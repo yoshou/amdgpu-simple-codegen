@@ -38,7 +38,7 @@ pub struct BitcodeBlock {
 #[derive(Clone, Debug)]
 pub enum BitcodeValue {
     Value(u64),
-    Array,
+    Array(Vec<BitcodeValue>),
     Char6(char),
     Blob(usize, usize),
 }
@@ -171,6 +171,58 @@ impl <'a> BitcodeReader<'a> {
         self.skip_bits(new_p - self.p)
     }
 
+    pub fn read_values_recursive<'b, I: Iterator<Item = &'b BitcodeOperand>>(&mut self, op: &BitcodeOperand, operands: &mut I) -> Result<BitcodeValue, DecodeError> {
+        match op {
+            BitcodeOperand::Literal(lit) => {
+                Ok(BitcodeValue::Value(*lit))
+            }
+            BitcodeOperand::Fixed(width) => {
+                let value = self.read_bits(*width)?;
+                Ok(BitcodeValue::Value(value))
+            }
+            BitcodeOperand::VBR(width) => {
+                let value = self.read_vbr(*width)?;
+                Ok(BitcodeValue::Value(value))
+            }
+            BitcodeOperand::Array => {
+                let len = self.read_vbr(6)?;
+                let encoding = if let Some(value) = operands.next() {
+                    value
+                } else {
+                    return Err(DecodeError { message: "Missing encoding for array elements".to_string() });
+                };
+                let mut array_values = vec![];
+                for _ in 0..len {
+                    let value = self.read_values_recursive(&encoding, operands)?;
+                    array_values.push(value);
+                }
+                Ok(BitcodeValue::Array(array_values))
+            }
+            BitcodeOperand::Char6 => {
+                let ch = self.read_bits(6)?;
+                Ok(BitcodeValue::Char6(char::from_u32(ch as u32).unwrap()))
+            }
+            BitcodeOperand::Blob => {
+                let len = self.read_vbr(6)? as usize;
+                let position = self.p;
+                self.skip_to_align(32)?;
+                self.skip_bytes(len)?;
+                self.skip_to_align(32)?;
+                Ok(BitcodeValue::Blob(position, len))
+            }
+        }
+    }
+
+    pub fn read_values(&mut self, operands: &[BitcodeOperand]) -> Result<Vec::<BitcodeValue>, DecodeError> {
+        let mut values = Vec::<BitcodeValue>::new();
+        let mut ops_iter = operands.iter();
+        while let Some(op) = ops_iter.next() {
+            let value = self.read_values_recursive(op, &mut ops_iter)?;
+            values.push(value);
+        }
+        Ok(values)
+    }
+
     pub fn read(&mut self) -> Result<BitcodeEntry, DecodeError> {
         let id = self.read_abbreviation_id();
 
@@ -256,60 +308,7 @@ impl <'a> BitcodeReader<'a> {
                 } else {
                     unimplemented!();
                 };
-                let mut values = Vec::<BitcodeValue>::new();
-                let mut ops_iter = abbrev.ops[1..].iter();
-                while let Some(op) = ops_iter.next() {
-                    match op {
-                        BitcodeOperand::Literal(lit) => {
-                            values.push(BitcodeValue::Value(*lit));
-                        }
-                        BitcodeOperand::VBR(width) => {
-                            let value = self.read_vbr(*width)?;
-                            values.push(BitcodeValue::Value(value));
-                        }
-                        BitcodeOperand::Fixed(width) => {
-                            let value = self.read_bits(*width)?;
-                            values.push(BitcodeValue::Value(value));
-                        }
-                        BitcodeOperand::Array => {
-                            let len = self.read_vbr(6)?;
-                            let encoding = if let Some(value) = ops_iter.next() {
-                                value
-                            } else {
-                                return Err(DecodeError { message: "Missing encoding for array elements".to_string() });
-                            };
-                            for _ in 0..len {
-                                match encoding {
-                                    BitcodeOperand::Fixed(width) => {
-                                        let value = self.read_bits(*width)?;
-                                        values.push(BitcodeValue::Value(value));
-                                    }
-                                    BitcodeOperand::VBR(width) => {
-                                        let value = self.read_vbr(*width)?;
-                                        values.push(BitcodeValue::Value(value));
-                                    }
-                                    BitcodeOperand::Char6 => {
-                                        let ch = self.read_bits(6)?;
-                                        values.push(BitcodeValue::Char6(char::from_u32(ch as u32).unwrap()));
-                                    }
-                                    _ => {
-                                        unimplemented!();
-                                    }
-                                }
-                            }
-                        }
-                        BitcodeOperand::Blob => {
-                            let len = self.read_vbr(6)? as usize;
-                            self.skip_to_align(32)?;
-                            values.push(BitcodeValue::Blob(self.p, len));
-                            self.skip_bytes(len)?;
-                            self.skip_to_align(32)?;
-                        }
-                        _ => {
-                            unimplemented!();
-                        }
-                    }
-                }
+                let values = self.read_values(&abbrev.ops[1..])?;
                 Ok(BitcodeEntry::Record(BitcodeRecord { code: code, values: values }))
             }
             _ => {
