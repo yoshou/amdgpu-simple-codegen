@@ -363,10 +363,13 @@ impl Bitcode {
                 BitcodeEntry::DefineAbbrev(_) => {
                 }
                 BitcodeEntry::EndBlock => {
+                    let error = DecodeError { message: "Broken block structure".to_string() };
                     if let Some(value) = expect_block_end.pop() {
                         if value as usize != reader.p {
-                            panic!();
+                            return Err(error);
                         }
+                    } else {
+                        return Err(error);
                     }
                 }
                 BitcodeEntry::Record(_) => {
