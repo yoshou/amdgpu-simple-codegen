@@ -306,7 +306,7 @@ impl <'a> BitcodeReader<'a> {
                 let code = if let BitcodeOperand::Literal(value) = abbrev.ops[0] {
                     value
                 } else {
-                    unimplemented!();
+                    return Err(DecodeError { message: "Invalid code operand".to_string() })
                 };
                 let values = self.read_values(&abbrev.ops[1..])?;
                 Ok(BitcodeEntry::Record(BitcodeRecord { code: code, values: values }))
