@@ -74,7 +74,7 @@ pub enum BitcodeEntry {
 
 impl <'a> BitcodeReader<'a> {
     pub fn new(data: &'a Bitcode) -> Self {
-        BitcodeReader { p: 0, bitcode: data, abbrev_len: vec![2], abbrevs: vec![vec![]], entries: vec![], scope: vec![], block_infos: HashMap::new() }
+        BitcodeReader { p: 32, bitcode: data, abbrev_len: vec![2], abbrevs: vec![vec![]], entries: vec![], scope: vec![], block_infos: HashMap::new() }
     }
 
     pub fn skip_bytes(&mut self, n: usize) -> Result<usize, DecodeError> {
@@ -166,6 +166,30 @@ impl <'a> BitcodeReader<'a> {
         Ok(value)
     }
 
+    pub fn read_char6(&mut self) -> Result<char, DecodeError> {
+        let ch = self.read_bits(6)? as u8;
+        match ch {
+            0..=25 => {
+                Ok(('a' as u8 + ch) as char)
+            }
+            26..=51 => {
+                Ok(('A' as u8 + (ch - 26)) as char)
+            }
+            52..=61 => {
+                Ok(('0' as u8 + (ch - 52)) as char)
+            }
+            62 => {
+                Ok('.')
+            }
+            63 => {
+                Ok('_')
+            }
+            _ => {
+                panic!();
+            }
+        }
+    }
+
     pub fn skip_to_align(&mut self, alignment: usize) -> Result<usize, DecodeError> {
         let new_p = ((self.p + alignment - 1) / alignment) * alignment;
         self.skip_bits(new_p - self.p)
@@ -199,8 +223,8 @@ impl <'a> BitcodeReader<'a> {
                 Ok(BitcodeValue::Array(array_values))
             }
             BitcodeOperand::Char6 => {
-                let ch = self.read_bits(6)?;
-                Ok(BitcodeValue::Char6(char::from_u32(ch as u32).unwrap()))
+                let ch = self.read_char6()?;
+                Ok(BitcodeValue::Char6(ch))
             }
             BitcodeOperand::Blob => {
                 let len = self.read_vbr(6)? as usize;
@@ -341,6 +365,33 @@ impl <'a> BitcodeReader<'a> {
 
         result
     }
+
+    pub fn read_to_end(&mut self) -> Result<Vec<BitcodeEntry>, DecodeError> {
+        let mut expect_block_end = vec![];
+        while self.p < self.bitcode.data.len() * 8 {
+            let entry = self.read()?;
+            match entry {
+                BitcodeEntry::Block(block) => {
+                    expect_block_end.push(self.p + block.blocklen as usize * 32);
+                }
+                BitcodeEntry::DefineAbbrev(_) => {
+                }
+                BitcodeEntry::EndBlock => {
+                    let error = DecodeError { message: "Broken block structure".to_string() };
+                    if let Some(value) = expect_block_end.pop() {
+                        if value as usize != self.p {
+                            return Err(error);
+                        }
+                    } else {
+                        return Err(error);
+                    }
+                }
+                BitcodeEntry::Record(_) => {
+                }
+            }
+        }
+        Ok(self.entries.clone())
+    }
 }
 
 impl Bitcode {
@@ -350,7 +401,6 @@ impl Bitcode {
 
     pub fn decode(&self) -> Result<Module, DecodeError> {
         let mut reader = BitcodeReader::new(self);
-        reader.skip_bytes(4)?;
 
         let mut expect_block_end = vec![];
 
