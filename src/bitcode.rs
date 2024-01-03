@@ -394,39 +394,315 @@ impl <'a> BitcodeReader<'a> {
     }
 }
 
+use num_derive::*;
+
+#[derive(FromPrimitive, ToPrimitive)]
+pub enum LLVMIRBlockID {
+    Module = 8,
+    Parameter,
+    ParameterGroup,
+    Constant,
+    Function,
+    ValueSymtab = 14,
+    Metadata,
+    MetadataAttachment,
+    Type,
+    Symtab = 23,
+}
+
+struct BitcodeModuleParser<'a> {
+    version: i32,
+    module: &'a mut Module,
+    entries: Vec<Type>
+}
+
+use either::*;
+
+fn flatten_record_values<'a>(record: &'a BitcodeRecord) -> impl Iterator<Item = &BitcodeValue> + 'a {
+    record.values.iter().flat_map(|x| {
+        match x {
+            BitcodeValue::Array(values) => {
+                Left(values.iter())
+            }
+            value => Right(std::iter::once(value))
+        }
+    })
+}
+
 impl Bitcode {
     pub fn new(data: &[u8]) -> Self {
         Bitcode { data: data.to_vec() }
     }
 
-    pub fn decode(&self) -> Result<Module, DecodeError> {
-        let mut reader = BitcodeReader::new(self);
-
-        let mut expect_block_end = vec![];
-
-        while reader.p < reader.bitcode.data.len() * 8 {
-            let entry = reader.read()?;
+    fn skip_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(iter: &mut I) -> Result<(), DecodeError> {
+        let mut depth = 1;
+        while let Some(entry) = iter.next() {
             match entry {
-                BitcodeEntry::Block(block) => {
-                    expect_block_end.push(reader.p + block.blocklen as usize * 32);
-                }
-                BitcodeEntry::DefineAbbrev(_) => {
+                BitcodeEntry::Block(_) => {
+                    depth += 1;
                 }
                 BitcodeEntry::EndBlock => {
-                    let error = DecodeError { message: "Broken block structure".to_string() };
-                    if let Some(value) = expect_block_end.pop() {
-                        if value as usize != reader.p {
-                            return Err(error);
-                        }
-                    } else {
-                        return Err(error);
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(())
                     }
                 }
-                BitcodeEntry::Record(_) => {
-                }
+                _ => {}
             }
-
         }
-        Ok(Module {})
+        Err(DecodeError { message: "Bloken block structure".to_string() })
+    }
+
+    fn parse_version_record(record: &BitcodeRecord) -> Result<i32, DecodeError> {
+        match record.values.get(0) {
+            Some(BitcodeValue::Value(value)) => {
+                Ok(*value as i32)
+            }
+            _ => Err(DecodeError { message: "Missing value".to_string() })
+        }
+    }
+
+    fn parse_num_entry_record(record: &BitcodeRecord) -> Result<usize, DecodeError> {
+        match record.values.get(0) {
+            Some(BitcodeValue::Value(value)) => {
+                Ok(*value as usize)
+            }
+            _ => Err(DecodeError { message: "Missing value".to_string() })
+        }
+    }
+
+    fn parse_type_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
+        let mut entries = &mut parser.entries;
+        let mut num_entry = entries.len();
+        while let Some(entry) = iter.next() {
+            match entry {
+                BitcodeEntry::Record(record) => {
+                    match record.code {
+                        1 => {
+                            num_entry += Bitcode::parse_num_entry_record(record)?;
+                        }
+                        2 => {
+                            if entries.len() >= num_entry {
+                                return Err(DecodeError { message: "Invalid number of entries".to_string() })
+                            }
+                            entries.push(Type::VoidType);
+                        }
+                        3 => {
+                            if entries.len() >= num_entry {
+                                return Err(DecodeError { message: "Invalid number of entries".to_string() })
+                            }
+                            entries.push(Type::FloatType);
+                        }
+                        4 => {
+                            if entries.len() >= num_entry {
+                                return Err(DecodeError { message: "Invalid number of entries".to_string() })
+                            }
+                            entries.push(Type::DoubleType);
+                        }
+                        5 => {
+                            if entries.len() >= num_entry {
+                                return Err(DecodeError { message: "Invalid number of entries".to_string() })
+                            }
+                            entries.push(Type::LabelType);
+                        }
+                        7 => {
+                            let width = match record.values.get(0) {
+                                Some(BitcodeValue::Value(value)) => {
+                                    *value as u32
+                                }
+                                _ => return Err(DecodeError { message: "Missing value".to_string() })
+                            };
+
+                            if entries.len() >= num_entry {
+                                return Err(DecodeError { message: "Invalid number of entries".to_string() })
+                            }
+                            entries.push(Type::IntegerType(IntegerType::new(width)));
+                        }
+                        16 => {
+                            if entries.len() >= num_entry {
+                                return Err(DecodeError { message: "Invalid number of entries".to_string() })
+                            }
+                            entries.push(Type::MetadataType);
+                        }
+                        19 => {
+                            let bytes = record.values.iter().map(|x| {
+                                match x {
+                                    BitcodeValue::Value(value) => {
+                                        Ok(*value as u8)
+                                    }
+                                    _ => Err(DecodeError { message: "Invalid value".to_string() })
+                                }
+                            }).collect::<Result<Vec<_>, _>>()?;
+                            let name = String::from_utf8(bytes).unwrap();
+
+                            let ty = if let Some(BitcodeEntry::Record(record)) = iter.next() {
+                                match record.code {
+                                    6 => {
+                                        unimplemented!();
+                                    }
+                                    20 => {
+                                        let values_iter = flatten_record_values(record).skip(1);
+                                        let elements = values_iter.map(|x: &BitcodeValue| {
+                                            match x {
+                                                BitcodeValue::Value(value) => {
+                                                    Ok(Box::new(entries.get(*value as usize).unwrap().clone()))
+                                                }
+                                                _ => Err(DecodeError { message: "Invalid value".to_string() })
+                                            }
+                                        }).collect::<Result<Vec<_>, DecodeError>>()?;
+                                        let struct_type = StructType::new_with_elements(name, elements);
+                                        Ok(Type::StructType(struct_type))
+                                    }
+                                    _ => {
+                                        Err(DecodeError { message: "Expect struct named or opaque".to_string() })
+                                    }
+                                }
+                            } else {
+                                Err(DecodeError { message: "Expect struct named or opaque".to_string() })
+                            }?;
+                            
+                            if entries.len() >= num_entry {
+                                return Err(DecodeError { message: "Invalid number of entries".to_string() })
+                            }
+                            entries.push(ty);
+                        }
+                        21 => {
+                            let mut values_iter = flatten_record_values(record);
+                            let is_vararg = if let Some(value) = values_iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value != 0
+                                    }
+                                    _ => {
+                                        return Err(DecodeError { message: "Invalid value".to_string() });
+                                    }
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing value".to_string() });
+                            };
+                            let return_type = if let Some(value) = values_iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        Box::new(entries.get(*value as usize).unwrap().clone())
+                                    }
+                                    _ => {
+                                        return Err(DecodeError { message: "Invalid value".to_string() });
+                                    }
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing value".to_string() });
+                            };
+                            let param_types = values_iter.map(|x: &BitcodeValue| {
+                                match x {
+                                    BitcodeValue::Value(value) => {
+                                        Ok(Box::new(entries.get(*value as usize).unwrap().clone()))
+                                    }
+                                    _ => Err(DecodeError { message: "Invalid value".to_string() })
+                                }
+                            }).collect::<Result<Vec<_>, DecodeError>>()?;
+                            let ty = FunctionType::new(return_type, param_types, is_vararg);
+                            
+
+                            if entries.len() >= num_entry {
+                                return Err(DecodeError { message: "Invalid number of entries".to_string() })
+                            }
+                            entries.push(Type::FunctionType(ty));
+                        }
+                        25 => {
+                            let address_space = match record.values.get(0) {
+                                Some(BitcodeValue::Value(value)) => {
+                                    *value as u32
+                                }
+                                _ => return Err(DecodeError { message: "Missing value".to_string() })
+                            };
+
+                            if entries.len() >= num_entry {
+                                return Err(DecodeError { message: "Invalid number of entries".to_string() })
+                            }
+                            entries.push(Type::PointerType(PointerType::new_with_address_space(address_space)));
+                        }
+                        _ => {
+                            unimplemented!();
+                        }
+                    }
+                }
+                BitcodeEntry::Block(_) => {
+                    return Err(DecodeError { message: "Unexpected block in type block".to_string() })
+                }
+                BitcodeEntry::EndBlock => {
+                    break;
+                }
+                BitcodeEntry::DefineAbbrev(_) => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn parse_module_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(&self, parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
+        while let Some(entry) = iter.next() {
+            match entry {
+                BitcodeEntry::Record(record) => {
+                    match record.code {
+                        1 => {
+                            parser.version = Bitcode::parse_version_record(record)?;
+                        }
+                        _ => {
+                            unimplemented!();
+                        }
+                    }
+                }
+                BitcodeEntry::Block(block) => {
+                    if block.blockid == 0 {
+                        Bitcode::skip_block(iter)?;
+                    } else if let Some(id) = num::traits::FromPrimitive::from_u64(block.blockid) {
+                        match id {
+                            LLVMIRBlockID::Type => {
+                                Bitcode::parse_type_block(parser, iter)?;
+                            }
+                            _ => {
+                                unimplemented!();
+                            }
+                        }
+                    } else {
+                        unimplemented!();
+                    }
+                }
+                BitcodeEntry::EndBlock => {
+                    break;
+                }
+                BitcodeEntry::DefineAbbrev(_) => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn decode(&self) -> Result<Module, DecodeError> {
+        let mut reader = BitcodeReader::new(self);
+        let entries = reader.read_to_end()?;
+
+        let mut iter = entries.iter();
+        
+        let mut module = Module {};
+        let mut parser = BitcodeModuleParser{ version: 0, module: &mut module, entries: vec![] };
+
+        while let Some(entry) = iter.next() {
+            match entry {
+                BitcodeEntry::Block(block) => {
+                    let id = num::traits::FromPrimitive::from_u64(block.blockid);
+                    match id {
+                        Some(LLVMIRBlockID::Module) => {
+                            self.parse_module_block(&mut parser, &mut iter)?;
+                            return Ok(module);
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Err(DecodeError { message: "Missing module".to_string() })
     }
 }
