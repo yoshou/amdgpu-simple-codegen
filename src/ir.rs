@@ -169,6 +169,23 @@ pub enum Attribute {
 
 #[derive(Clone, Debug)]
 pub struct AttributeList {
-    pub attributes: HashSet<Attribute>,
-    pub function_attributes: HashSet<Attribute>
+    pub attributes: Vec<HashSet<Attribute>>
+}
+
+impl AttributeList {
+    pub fn merge(attributes_list: Vec<Self>) -> Option<Self> {
+        let size = attributes_list.iter().map(|x| x.attributes.len()).max()?;
+
+        let mut merged_attributes = AttributeList { attributes: vec![HashSet::new(); size] };
+
+        for attributes in &attributes_list {
+            for (merged_attributes, attributes) in merged_attributes.attributes.iter_mut().zip(attributes.attributes[0..attributes.attributes.len() - 1].iter()) {
+                merged_attributes.extend(attributes.clone());
+            }
+            merged_attributes.attributes.last_mut()
+                .and_then(|merged_attributes| attributes.attributes.last().map(|attributes| merged_attributes.extend(attributes.clone())));
+        }
+        
+        Some(merged_attributes)
+    }
 }

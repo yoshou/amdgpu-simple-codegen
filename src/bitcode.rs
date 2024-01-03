@@ -414,7 +414,8 @@ struct BitcodeModuleParser<'a> {
     version: i32,
     module: &'a mut Module,
     types: Vec<Type>,
-    attributes: HashMap<u32, AttributeList>
+    attribute_groups: HashMap<u32, AttributeList>,
+    attributes: Vec<AttributeList>
 }
 
 use either::*;
@@ -758,7 +759,6 @@ impl Bitcode {
                 BitcodeEntry::Record(record) => {
                     match record.code {
                         3 => {
-                            let mut list = AttributeList { attributes: HashSet::new(), function_attributes: HashSet::new() };
                             let mut values = record.values.iter();
 
                             let group_id = match values.next() {
@@ -774,6 +774,8 @@ impl Bitcode {
                                 }
                                 _ => return Err(DecodeError { message: "Missing value".to_string() })
                             };
+
+                            let mut attributes = HashSet::new();
 
                             while let Some(value) = values.next() {
                                 let code = match value {
@@ -811,14 +813,19 @@ impl Bitcode {
                                     }
                                 };
 
-                                if index == u32::MAX {
-                                    list.function_attributes.insert(attribute);
-                                } else {
-                                    list.attributes.insert(attribute);
-                                }
+                                attributes.insert(attribute);
                             }
 
-                            parser.attributes.insert(group_id, list);
+                            let mut list = AttributeList { attributes: vec![] };
+
+                            if index != u32::MAX {
+                                list.attributes.resize(index as usize + 2, HashSet::new());
+                                list.attributes[index as usize] = attributes;
+                            } else {
+                                list.attributes.push(attributes);
+                            }
+
+                            parser.attribute_groups.insert(group_id, list);
                         }
                         _ => {
                             unimplemented!();
@@ -827,6 +834,49 @@ impl Bitcode {
                 }
                 BitcodeEntry::Block(_) => {
                     return Err(DecodeError { message: "Unexpected block in parameter group block".to_string() })
+                }
+                BitcodeEntry::EndBlock => {
+                    break;
+                }
+                BitcodeEntry::DefineAbbrev(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_parameter_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
+        while let Some(entry) = iter.next() {
+            match entry {
+                BitcodeEntry::Record(record) => {
+                    match record.code {
+                        1 => unimplemented!(),
+                        2 => {
+                            let mut groups = vec![];
+                            for value in &record.values {
+                                let group_id = match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value as u32
+                                    }
+                                    _ => return Err(DecodeError { message: "Missing value".to_string() })
+                                };
+                                let group = parser.attribute_groups.get(&group_id)
+                                    .ok_or(DecodeError { message: "Invalid group id".to_string() })?;
+                                groups.push(group.clone());
+                            }
+
+                            let attributes = AttributeList::merge(groups).ok_or(
+                                DecodeError { message: "Invalid attributes".to_string() }
+                            )?;
+
+                            parser.attributes.push(attributes);
+                        }
+                        _ => {
+                            unimplemented!();
+                        }
+                    }
+                }
+                BitcodeEntry::Block(_) => {
+                    return Err(DecodeError { message: "Unexpected block in parameter block".to_string() })
                 }
                 BitcodeEntry::EndBlock => {
                     break;
@@ -861,6 +911,9 @@ impl Bitcode {
                             LLVMIRBlockID::ParameterGroup => {
                                 Bitcode::parse_parameter_group_block(parser, iter)?;
                             }
+                            LLVMIRBlockID::Parameter => {
+                                Bitcode::parse_parameter_block(parser, iter)?;
+                            }
                             _ => {
                                 unimplemented!();
                             }
@@ -886,7 +939,7 @@ impl Bitcode {
         let mut iter = entries.iter();
         
         let mut module = Module {};
-        let mut parser = BitcodeModuleParser{ version: 0, module: &mut module, types: vec![], attributes: HashMap::new() };
+        let mut parser = BitcodeModuleParser{ version: 0, module: &mut module, types: vec![], attribute_groups: HashMap::new(),  attributes: vec![] };
 
         while let Some(entry) = iter.next() {
             match entry {
