@@ -15,7 +15,7 @@ pub struct DecodeError {
     pub message: String
 }
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct BitcodeReader<'a> {
     p: usize,
@@ -413,10 +413,12 @@ pub enum LLVMIRBlockID {
 struct BitcodeModuleParser<'a> {
     version: i32,
     module: &'a mut Module,
-    entries: Vec<Type>
+    types: Vec<Type>,
+    attributes: HashMap<u32, AttributeList>
 }
 
 use either::*;
+use num_traits::FromPrimitive;
 
 fn flatten_record_values<'a>(record: &'a BitcodeRecord) -> impl Iterator<Item = &BitcodeValue> + 'a {
     record.values.iter().flat_map(|x| {
@@ -427,6 +429,117 @@ fn flatten_record_values<'a>(record: &'a BitcodeRecord) -> impl Iterator<Item = 
             value => Right(std::iter::once(value))
         }
     })
+}
+
+impl num::FromPrimitive for AttributeKind {
+    fn from_i64(value: i64) -> Option<Self> {
+        if value < 0 {
+            None
+        } else {
+            Self::from_u64(value as u64)
+        }
+    }
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            1 => Some(Self::Alignment),
+            2 => Some(Self::AlwaysInline),
+            3 => Some(Self::ByVal),
+            4 => Some(Self::InlineHint),
+            5 => Some(Self::InReg),
+            6 => Some(Self::MinSize),
+            7 => Some(Self::Naked),
+            8 => Some(Self::Nest),
+            9 => Some(Self::NoAlias),
+            10 => Some(Self::NoBuiltin),
+            11 => Some(Self::NoCapture),
+            12 => unimplemented!(),
+            13 => unimplemented!(),
+            14 => unimplemented!(),
+            15 => unimplemented!(),
+            16 => unimplemented!(),
+            17 => unimplemented!(),
+            18 => Some(Self::NoUnwind),
+            19 => unimplemented!(),
+            20 => unimplemented!(),
+            21 => Some(Self::ReadOnly),
+            22 => unimplemented!(),
+            23 => unimplemented!(),
+            24 => unimplemented!(),
+            25 => unimplemented!(),
+            26 => unimplemented!(),
+            27 => unimplemented!(),
+            28 => unimplemented!(),
+            29 => unimplemented!(),
+            30 => unimplemented!(),
+            31 => unimplemented!(),
+            32 => unimplemented!(),
+            33 => unimplemented!(),
+            34 => unimplemented!(),
+            35 => unimplemented!(),
+            36 => unimplemented!(),
+            37 => unimplemented!(),
+            38 => unimplemented!(),
+            39 => unimplemented!(),
+            40 => unimplemented!(),
+            41 => unimplemented!(),
+            42 => unimplemented!(),
+            43 => unimplemented!(),
+            44 => unimplemented!(),
+            45 => unimplemented!(),
+            46 => unimplemented!(),
+            47 => unimplemented!(),
+            48 => Some(Self::NoRecurse),
+            49 => unimplemented!(),
+            50 => unimplemented!(),
+            51 => unimplemented!(),
+            52 => Some(Self::WriteOnly),
+            53 => Some(Self::Speculatable),
+            54 => unimplemented!(),
+            55 => unimplemented!(),
+            56 => unimplemented!(),
+            57 => unimplemented!(),
+            58 => unimplemented!(),
+            59 => unimplemented!(),
+            60 => unimplemented!(),
+            61 => Some(Self::WillReturn),
+            62 => Some(Self::NoFree),
+            63 => Some(Self::NoSync),
+            64 => unimplemented!(),
+            65 => unimplemented!(),
+            66 => unimplemented!(),
+            67 => unimplemented!(),
+            68 => unimplemented!(),
+            69 => unimplemented!(),
+            70 => Some(Self::MustProgress),
+            71 => Some(Self::NoCallback),
+            72 => unimplemented!(),
+            73 => unimplemented!(),
+            74 => unimplemented!(),
+            75 => unimplemented!(),
+            76 => unimplemented!(),
+            77 => unimplemented!(),
+            78 => unimplemented!(),
+            79 => unimplemented!(),
+            80 => unimplemented!(),
+            81 => unimplemented!(),
+            82 => unimplemented!(),
+            83 => unimplemented!(),
+            84 => unimplemented!(),
+            85 => unimplemented!(),
+            86 => Some(Self::Memory),
+            87 => unimplemented!(),
+            88 => unimplemented!(),
+            _ => None
+        }
+    }
+}
+
+fn parse_null_terminated_string<'a, I: Iterator<Item = &'a BitcodeValue>>(iter: &mut I) -> Result<String, DecodeError> {
+    String::from_utf8(iter.map_while(|value| match value {
+        BitcodeValue::Value(0) => None,
+        BitcodeValue::Value(x) => Some(x.clone() as u8),
+        _ => None,
+    }).collect::<Vec<_>>()).map_err(|_| DecodeError { message: "Invalid attribute string".to_string() })
 }
 
 impl Bitcode {
@@ -472,7 +585,7 @@ impl Bitcode {
     }
 
     fn parse_type_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
-        let mut entries = &mut parser.entries;
+        let mut entries = &mut parser.types;
         let mut num_entry = entries.len();
         while let Some(entry) = iter.next() {
             match entry {
@@ -639,7 +752,92 @@ impl Bitcode {
         Ok(())
     }
 
-    pub fn parse_module_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(&self, parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
+    fn parse_parameter_group_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
+        while let Some(entry) = iter.next() {
+            match entry {
+                BitcodeEntry::Record(record) => {
+                    match record.code {
+                        3 => {
+                            let mut list = AttributeList { attributes: HashSet::new(), function_attributes: HashSet::new() };
+                            let mut values = record.values.iter();
+
+                            let group_id = match values.next() {
+                                Some(BitcodeValue::Value(value)) => {
+                                    *value as u32
+                                }
+                                _ => return Err(DecodeError { message: "Missing value".to_string() })
+                            };
+
+                            let index = match values.next() {
+                                Some(BitcodeValue::Value(value)) => {
+                                    *value as u32
+                                }
+                                _ => return Err(DecodeError { message: "Missing value".to_string() })
+                            };
+
+                            while let Some(value) = values.next() {
+                                let code = match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value as u32
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid value".to_string() })
+                                };
+                                let attribute = match code {
+                                    0 => {
+                                        let kind = values.next().and_then(|value| match value {
+                                            BitcodeValue::Value(value) => AttributeKind::from_u64(*value),
+                                            _ => None
+                                        }).ok_or(DecodeError { message: "Invalid attribute kind".to_string() })?;
+                                        Attribute::Enum(kind)
+                                    }
+                                    1 => {
+                                        let kind = values.next().and_then(|value| match value {
+                                            BitcodeValue::Value(value) => AttributeKind::from_u64(*value),
+                                            _ => None
+                                        }).ok_or(DecodeError { message: "Invalid attribute kind".to_string() })?;
+                                        let value = values.next().and_then(|value| match value {
+                                            BitcodeValue::Value(value) => Some(*value),
+                                            _ => None
+                                        }).ok_or(DecodeError { message: "Invalid attribute kind".to_string() })?;
+                                        Attribute::Int(kind, value)
+                                    }
+                                    4 => {
+                                        let key = parse_null_terminated_string(&mut values)?;
+                                        let value = parse_null_terminated_string(&mut values)?;
+                                        Attribute::String(key, value)
+                                    }
+                                    _ => {
+                                        return Err(DecodeError { message: "Invalid attribute".to_string() })
+                                    }
+                                };
+
+                                if index == u32::MAX {
+                                    list.function_attributes.insert(attribute);
+                                } else {
+                                    list.attributes.insert(attribute);
+                                }
+                            }
+
+                            parser.attributes.insert(group_id, list);
+                        }
+                        _ => {
+                            unimplemented!();
+                        }
+                    }
+                }
+                BitcodeEntry::Block(_) => {
+                    return Err(DecodeError { message: "Unexpected block in parameter group block".to_string() })
+                }
+                BitcodeEntry::EndBlock => {
+                    break;
+                }
+                BitcodeEntry::DefineAbbrev(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_module_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(&self, parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
         while let Some(entry) = iter.next() {
             match entry {
                 BitcodeEntry::Record(record) => {
@@ -659,6 +857,9 @@ impl Bitcode {
                         match id {
                             LLVMIRBlockID::Type => {
                                 Bitcode::parse_type_block(parser, iter)?;
+                            }
+                            LLVMIRBlockID::ParameterGroup => {
+                                Bitcode::parse_parameter_group_block(parser, iter)?;
                             }
                             _ => {
                                 unimplemented!();
@@ -685,7 +886,7 @@ impl Bitcode {
         let mut iter = entries.iter();
         
         let mut module = Module {};
-        let mut parser = BitcodeModuleParser{ version: 0, module: &mut module, entries: vec![] };
+        let mut parser = BitcodeModuleParser{ version: 0, module: &mut module, types: vec![], attributes: HashMap::new() };
 
         while let Some(entry) = iter.next() {
             match entry {
