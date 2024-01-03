@@ -585,7 +585,7 @@ impl Bitcode {
     }
 
     fn parse_type_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
-        let mut entries = &mut parser.types;
+        let entries = &mut parser.types;
         let mut num_entry = entries.len();
         while let Some(entry) = iter.next() {
             match entry {
