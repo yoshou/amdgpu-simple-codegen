@@ -272,6 +272,27 @@ pub enum Constant {
 }
 
 #[derive(Clone, Debug)]
+pub struct Function {
+    pub ty: FunctionType,
+    pub linkage: LinkageTypes,
+    pub address_space: u32,
+    pub name: String,
+    pub attributes: AttributeList,
+    pub alignment: Option<u32>,
+    pub visibility: VisibilityTypes,
+    pub unnamed_address: UnnamedAddr,
+    pub dll_storage_class: DLLStorageClassTypes,
+    pub comdat: Option<Comdat>,
+}
+
+#[derive(Clone, Debug)]
 pub enum Value {
-    GlobalVariable(GlobalVariable)
+    GlobalVariable(GlobalVariable),
+    Function(Function),
+}
+
+impl Function {
+    pub fn arg_size(&self) -> usize {
+        self.ty.params.len()
+    }
 }
