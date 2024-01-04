@@ -394,6 +394,7 @@ impl <'a> BitcodeReader<'a> {
     }
 }
 
+use num_bigint::ToBigUint;
 use num_derive::*;
 
 #[derive(FromPrimitive, ToPrimitive)]
@@ -423,6 +424,7 @@ struct BitcodeModuleParser<'a> {
     comdats: Vec<Comdat>,
     values: Vec<Value>,
     global_inits: HashMap<usize, u64>,
+    vst_offset: u64,
 }
 
 use either::*;
@@ -737,6 +739,15 @@ impl Bitcode {
         }
     }
 
+    fn parse_vst_offset_record(record: &BitcodeRecord) -> Result<u64, DecodeError> {
+        match record.values.get(0) {
+            Some(BitcodeValue::Value(value)) => {
+                Ok(*value - 1)
+            }
+            _ => Err(DecodeError { message: "Missing value".to_string() })
+        }
+    }
+
     fn parse_type_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
         let entries = &mut parser.types;
         let mut num_entry = entries.len();
@@ -1026,6 +1037,78 @@ impl Bitcode {
                             unimplemented!();
                         }
                     }
+                }
+                BitcodeEntry::Block(_) => {
+                    return Err(DecodeError { message: "Unexpected block in parameter block".to_string() })
+                }
+                BitcodeEntry::EndBlock => {
+                    break;
+                }
+                BitcodeEntry::DefineAbbrev(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_constant_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
+        let mut current_type = Type::VoidType;
+        while let Some(entry) = iter.next() {
+            match entry {
+                BitcodeEntry::Record(record) => {
+                    let mut value = None;
+                    match record.code {
+                        1 => {
+                            if let Some(value) = record.values.get(0) {
+                                let type_id = match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value as usize
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid value type".to_string() })
+                                };
+
+                                current_type = parser.types.get(type_id).ok_or(DecodeError { message: "Invalid value".to_string() })?.clone();
+                            } else {
+                                return Err(DecodeError { message: "Missing value".to_string() })
+                            }
+                            continue;
+                        }
+                        2 => {
+                            let const_value = match current_type {
+                                Type::IntegerType(_) => Value::ConstantInt(ConstantInt { ty: current_type.clone(), value: 0.to_biguint().unwrap() }),
+                                _ => return Err(DecodeError { message: "Type undefined null".to_string() })
+                            };
+                            value = Some(const_value);
+                        }
+                        3 => {
+                            value = Some(Value::Undef(Undef { ty: current_type.clone() }));
+                        }
+                        4 => {
+                            let const_value = if let Some(value) = record.values.get(0) {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid value type".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing value".to_string() })
+                            };
+
+                            let const_value = if const_value & 1 == 0 {
+                                const_value >> 1
+                            } else if const_value != 1 {
+                                -((const_value >> 1) as i64) as u64
+                            } else {
+                                1u64 << 63
+                            };
+
+                            value = Some(Value::ConstantInt(ConstantInt { ty: current_type.clone(), value: const_value.to_biguint().unwrap() }));
+                        }
+                        _ => {
+                            unimplemented!();
+                        }
+                    }
+                    parser.values.push(value.unwrap());
                 }
                 BitcodeEntry::Block(_) => {
                     return Err(DecodeError { message: "Unexpected block in parameter block".to_string() })
@@ -1488,6 +1571,9 @@ impl Bitcode {
                         12 => {
                             Bitcode::parse_comdat_record(parser, record)?;
                         }
+                        13 => {
+                            parser.vst_offset = Bitcode::parse_vst_offset_record(record)?;
+                        }
                         16 => {
                             parser.source_filename = Bitcode::parse_source_filename_record(record)?;
                         }
@@ -1510,10 +1596,22 @@ impl Bitcode {
                             LLVMIRBlockID::Parameter => {
                                 Bitcode::parse_parameter_block(parser, iter)?;
                             }
+                            LLVMIRBlockID::Constant => {
+                                Bitcode::parse_constant_block(parser, iter)?;
+                            }
+                            LLVMIRBlockID::Metadata => {
+                                Bitcode::skip_block(iter)?;
+                            }
                             _ => {
                                 unimplemented!();
                             }
                         }
+                    } else if block.blockid == 21 {
+                        Bitcode::skip_block(iter)?;
+                    } else if block.blockid == 22 {
+                        Bitcode::skip_block(iter)?;
+                    } else if block.blockid == 26 {
+                        Bitcode::skip_block(iter)?;
                     } else {
                         unimplemented!();
                     }
@@ -1604,6 +1702,7 @@ impl Bitcode {
             comdats: vec![],
             values: vec![],
             global_inits: HashMap::new(),
+            vst_offset: 0,
         };
 
         while let Some(entry) = iter.next() {

@@ -285,10 +285,25 @@ pub struct Function {
     pub comdat: Option<Comdat>,
 }
 
+use num_bigint::BigUint;
+
+#[derive(Clone, Debug)]
+pub struct ConstantInt {
+    pub ty: Type,
+    pub value: BigUint,
+}
+
+#[derive(Clone, Debug)]
+pub struct Undef {
+    pub ty: Type,
+}
+
 #[derive(Clone, Debug)]
 pub enum Value {
     GlobalVariable(GlobalVariable),
     Function(Function),
+    Undef(Undef),
+    ConstantInt(ConstantInt)
 }
 
 impl Function {
