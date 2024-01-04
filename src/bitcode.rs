@@ -407,15 +407,22 @@ pub enum LLVMIRBlockID {
     Metadata,
     MetadataAttachment,
     Type,
-    Symtab = 23,
+    Strtab = 23,
 }
 
 struct BitcodeModuleParser<'a> {
+    strtab: Vec<u8>,
     version: i32,
+    triple: String,
+    data_layout: String,
+    source_filename: String,
     module: &'a mut Module,
     types: Vec<Type>,
     attribute_groups: HashMap<u32, AttributeList>,
-    attributes: Vec<AttributeList>
+    attributes: Vec<AttributeList>,
+    comdats: Vec<Comdat>,
+    values: Vec<Value>,
+    global_inits: HashMap<usize, u64>,
 }
 
 use either::*;
@@ -543,6 +550,111 @@ fn parse_null_terminated_string<'a, I: Iterator<Item = &'a BitcodeValue>>(iter: 
     }).collect::<Vec<_>>()).map_err(|_| DecodeError { message: "Invalid attribute string".to_string() })
 }
 
+impl num::FromPrimitive for LinkageTypes {
+    fn from_i64(value: i64) -> Option<Self> {
+        if value < 0 {
+            None
+        } else {
+            Self::from_u64(value as u64)
+        }
+    }
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            0 => Some(Self::External),
+            2 => Some(Self::Appending),
+            3 => Some(Self::Internal),
+            5 => Some(Self::External),
+            6 => Some(Self::External),
+            7 => Some(Self::ExternalWeak),
+            8 => Some(Self::Common),
+            9 => Some(Self::Private),
+            12 => Some(Self::AvailableExternally),
+            13 => Some(Self::Private),
+            14 => Some(Self::Private),
+            15 => Some(Self::External),
+            1 | 16 => Some(Self::WeakAny),
+            10 | 17 => Some(Self::WeakODR),
+            4 | 18 => Some(Self::LinkOnceAny),
+            11 | 19 => Some(Self::LinkOnceODR),
+            _ => None
+        }
+    }
+}
+
+impl num::FromPrimitive for VisibilityTypes {
+    fn from_i64(value: i64) -> Option<Self> {
+        if value < 0 {
+            None
+        } else {
+            Self::from_u64(value as u64)
+        }
+    }
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            0 => Some(Self::Default),
+            1 => Some(Self::Hidden),
+            2 => Some(Self::Protected),
+            _ => None
+        }
+    }
+}
+
+impl num::FromPrimitive for ThreadLocalMode {
+    fn from_i64(value: i64) -> Option<Self> {
+        if value < 0 {
+            None
+        } else {
+            Self::from_u64(value as u64)
+        }
+    }
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            0 => Some(Self::NotThreadLocal),
+            1 => Some(Self::GeneralDynamicTLSModel),
+            2 => Some(Self::LocalDynamicTLSModel),
+            3 => Some(Self::InitialExecTLSModel),
+            4 => Some(Self::LocalExecTLSModel),
+            _ => None
+        }
+    }
+}
+
+impl num::FromPrimitive for UnnamedAddr {
+    fn from_i64(value: i64) -> Option<Self> {
+        if value < 0 {
+            None
+        } else {
+            Self::from_u64(value as u64)
+        }
+    }
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            0 => Some(Self::None),
+            1 => Some(Self::Global),
+            2 => Some(Self::Local),
+            _ => None
+        }
+    }
+}
+
+impl num::FromPrimitive for DLLStorageClassTypes {
+    fn from_i64(value: i64) -> Option<Self> {
+        if value < 0 {
+            None
+        } else {
+            Self::from_u64(value as u64)
+        }
+    }
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            0 => Some(Self::Default),
+            1 => Some(Self::DLLImport),
+            2 => Some(Self::DLLExport),
+            _ => None
+        }
+    }
+}
+
 impl Bitcode {
     pub fn new(data: &[u8]) -> Self {
         Bitcode { data: data.to_vec() }
@@ -574,6 +686,46 @@ impl Bitcode {
             }
             _ => Err(DecodeError { message: "Missing value".to_string() })
         }
+    }
+
+    fn parse_triple_record(record: &BitcodeRecord) -> Result<String, DecodeError> {
+        let bytes = record.values.iter().map(|x| {
+            match x {
+                BitcodeValue::Value(value) => {
+                    Ok(*value as u8)
+                }
+                _ => Err(DecodeError { message: "Invalid value".to_string() })
+            }
+        }).collect::<Result<Vec<_>, _>>()?;
+        String::from_utf8(bytes).map_err(|_| DecodeError { message: "Invalid triple string".to_string() })
+    }
+
+    fn parse_data_layout_record(record: &BitcodeRecord) -> Result<String, DecodeError> {
+        let bytes = record.values.iter().map(|x| {
+            match x {
+                BitcodeValue::Value(value) => {
+                    Ok(*value as u8)
+                }
+                _ => Err(DecodeError { message: "Invalid value".to_string() })
+            }
+        }).collect::<Result<Vec<_>, _>>()?;
+        String::from_utf8(bytes).map_err(|_| DecodeError { message: "Invalid data layout string".to_string() })
+    }
+
+    fn parse_source_filename_record(record: &BitcodeRecord) -> Result<String, DecodeError> {
+        let values_iter = flatten_record_values(record);
+        let bytes = values_iter.map(|x| {
+            match x {
+                BitcodeValue::Value(value) => {
+                    Ok(*value as u8)
+                }
+                BitcodeValue::Char6(value) => {
+                    Ok(*value as u8)
+                }
+                _ => Err(DecodeError { message: "Invalid value".to_string() })
+            }
+        }).collect::<Result<Vec<_>, _>>()?;
+        String::from_utf8(bytes).map_err(|_| DecodeError { message: "Invalid source filename string".to_string() })
     }
 
     fn parse_num_entry_record(record: &BitcodeRecord) -> Result<usize, DecodeError> {
@@ -887,6 +1039,227 @@ impl Bitcode {
         Ok(())
     }
 
+    fn get_string_from_strtab<'b, I: Iterator<Item = &'b BitcodeValue>>(parser: &BitcodeModuleParser, iter: &mut I) -> Result<String, DecodeError> {
+        let name_offset = match iter.next() {
+            Some(BitcodeValue::Value(value)) => {
+                *value as usize
+            }
+            _ => return Err(DecodeError { message: "Missing string offset in strtab".to_string() })
+        };
+        let name_size = match iter.next() {
+            Some(BitcodeValue::Value(value)) => {
+                *value as usize
+            }
+            _ => return Err(DecodeError { message: "Missing string size".to_string() })
+        };
+
+        String::from_utf8(parser.strtab[name_offset..name_offset + name_size].to_vec())
+            .map_err(|_| DecodeError { message: "Invalid name string encoding".to_string() })
+    }
+
+    fn parse_comdat_record(parser: &mut BitcodeModuleParser, record: &BitcodeRecord) -> Result<(), DecodeError> {
+        let mut iter = record.values.iter();
+        let name = Bitcode::get_string_from_strtab(parser, &mut iter)?;
+    
+        let selection_kind = match iter.next() {
+            Some(BitcodeValue::Value(value)) => {
+                match *value {
+                    1 => ComdatSelectionKind::Any,
+                    2 => ComdatSelectionKind::ExactMatch,
+                    3 => ComdatSelectionKind::Largest,
+                    4 => ComdatSelectionKind::NoDeduplicate,
+                    5 => ComdatSelectionKind::SameSize,
+                    _ => return Err(DecodeError { message: "Unknown comdat selection kind".to_string() })
+                }
+            }
+            _ => return Err(DecodeError { message: "Missing comdat selection kind".to_string() })
+        };
+
+        parser.comdats.push(Comdat { name: name, selection_kind: selection_kind });
+
+        Ok(())
+    }
+
+    fn parse_globalvar_record(parser: &mut BitcodeModuleParser, record: &BitcodeRecord) -> Result<(), DecodeError> {
+        let mut iter = record.values.iter();
+        let name = Bitcode::get_string_from_strtab(parser, &mut iter)?;
+
+        let ty = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    parser.types.get(*value as usize).unwrap().clone()
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar type value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing globalvar type".to_string() });
+        };
+        
+        let (is_constant, address_space) = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    (
+                        (*value & 1) != 0,
+                        if (*value & 2) != 0 {
+                            (*value >> 2) as u32
+                        } else {
+                            unimplemented!();
+                        }
+                    )
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar is constant value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing globalvar is constant".to_string() });
+        };
+
+        let init_id = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    if *value > 0 {
+                        Some(*value - 1)
+                    } else {
+                        None
+                    }
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar initrd value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing globalvar initrd".to_string() });
+        };
+        
+        let linkage = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    LinkageTypes::from_u64(*value).unwrap()
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar linkage value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing globalvar linkage".to_string() });
+        };
+        
+        let alignment = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    *value
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar alignment value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing globalvar alignment".to_string() });
+        } - 1;
+        
+        let section = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    if *value > 0 {
+                        Some(*value - 1)
+                    } else {
+                        None
+                    }
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar section value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing globalvar section".to_string() });
+        };
+
+        if let Some(_) = section {
+            unimplemented!();
+        }
+        
+        let visibility = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    VisibilityTypes::from_u64(*value).unwrap()
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar visibility value".to_string() })
+            }
+        } else {
+            VisibilityTypes::Default
+        };
+        
+        let thread_local = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    ThreadLocalMode::from_u64(*value).unwrap()
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar thread local value".to_string() })
+            }
+        } else {
+            ThreadLocalMode::NotThreadLocal
+        };
+        
+        let unnamed_addr = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    UnnamedAddr::from_u64(*value).unwrap()
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar unnamed addr value".to_string() })
+            }
+        } else {
+            UnnamedAddr::None
+        };
+        
+        let is_externally_initialized = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    *value != 0
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar externally initialized value".to_string() })
+            }
+        } else {
+            false
+        };
+        
+        let dll_storage_class = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    DLLStorageClassTypes::from_u64(*value).unwrap()
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar dll storage class value".to_string() })
+            }
+        } else {
+            DLLStorageClassTypes::Default
+        };
+
+        let comdat = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    parser.comdats.get(*value as usize - 1)
+                }
+                _ => return Err(DecodeError { message: "Invalid globalvar comdat value".to_string() })
+            }
+        } else {
+            None
+        };
+
+        let global_var = GlobalVariable {
+            ty: ty,
+            is_constant: is_constant,
+            linkage: linkage,
+            name: name,
+            initial_value: None,
+            thread_local_mode: thread_local,
+            address_space: Some(address_space),
+            is_externally_initialized: is_externally_initialized,
+            visibility: visibility,
+            unnamed_address: unnamed_addr,
+            dll_storage_class: dll_storage_class,
+            alignment: alignment as u32,
+            comdat: comdat.map(|x| x.clone()),
+        };
+        
+        parser.values.push(Value::GlobalVariable(global_var));
+
+        if let Some(init_id) = init_id {
+            parser.global_inits.insert(parser.values.len() - 1, init_id);
+        }
+    
+        Ok(())
+    }
+
     fn parse_module_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(&self, parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
         while let Some(entry) = iter.next() {
             match entry {
@@ -894,6 +1267,21 @@ impl Bitcode {
                     match record.code {
                         1 => {
                             parser.version = Bitcode::parse_version_record(record)?;
+                        }
+                        2 => {
+                            parser.triple = Bitcode::parse_triple_record(record)?;
+                        }
+                        3 => {
+                            parser.data_layout = Bitcode::parse_data_layout_record(record)?;
+                        }
+                        7 => {
+                            Bitcode::parse_globalvar_record(parser, record)?;
+                        }
+                        12 => {
+                            Bitcode::parse_comdat_record(parser, record)?;
+                        }
+                        16 => {
+                            parser.source_filename = Bitcode::parse_source_filename_record(record)?;
                         }
                         _ => {
                             unimplemented!();
@@ -932,14 +1320,83 @@ impl Bitcode {
         Ok(())
     }
 
+    fn parse_strtab_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(data: &Vec<u8>, iter: &mut I) -> Result<Vec<u8>, DecodeError> {
+        while let Some(entry) = iter.next() {
+            match entry {
+                BitcodeEntry::Record(record) => {
+                    match record.code {
+                        1 =>  {
+                            let strtab = if let Some(BitcodeValue::Blob(offset, size)) = record.values.get(0) {
+                                let offset = *offset / 8 + 4;
+                                data[offset..offset + *size].to_vec()
+                            } else {
+                                return Err(DecodeError { message: "Invalid strtab data".to_string() });
+                            };
+                            return Ok(strtab);
+                        }
+                        _ => {
+                            unimplemented!();
+                        }
+                    }
+                }
+                BitcodeEntry::Block(_) => {
+                    return Err(DecodeError { message: "Unexpected block in parameter block".to_string() })
+                }
+                BitcodeEntry::EndBlock => {
+                    break;
+                }
+                BitcodeEntry::DefineAbbrev(_) => {}
+            }
+        }
+        Err(DecodeError { message: "Missing strtab data".to_string() })
+    }
+
+    fn get_strtab(data: &Vec<u8>, entries: &Vec<BitcodeEntry>) -> Result<Vec<u8>, DecodeError> {
+        let mut iter = entries.iter();
+        
+        while let Some(entry) = iter.next() {
+            match entry {
+                BitcodeEntry::Block(block) => {
+                    let id = num::traits::FromPrimitive::from_u64(block.blockid);
+                    match id {
+                        Some(LLVMIRBlockID::Strtab) => {
+                            let strtab = Bitcode::parse_strtab_block(data, &mut iter)?;
+                            return Ok(strtab);
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {
+                    Bitcode::skip_block(&mut iter)?;
+                }
+            }
+        }
+        Err(DecodeError { message: "Missing strtab data".to_string() })
+    }
+
     pub fn decode(&self) -> Result<Module, DecodeError> {
         let mut reader = BitcodeReader::new(self);
         let entries = reader.read_to_end()?;
 
+        let strtab = Bitcode::get_strtab(&self.data, &entries)?;
+
         let mut iter = entries.iter();
         
         let mut module = Module {};
-        let mut parser = BitcodeModuleParser{ version: 0, module: &mut module, types: vec![], attribute_groups: HashMap::new(),  attributes: vec![] };
+        let mut parser = BitcodeModuleParser{
+            strtab: strtab,
+            version: 0,
+            triple: "".to_string(),
+            data_layout: "".to_string(),
+            source_filename: "".to_string(),
+            module: &mut module,
+            types: vec![],
+            attribute_groups: HashMap::new(),
+            attributes: vec![],
+            comdats: vec![],
+            values: vec![],
+            global_inits: HashMap::new(),
+        };
 
         while let Some(entry) = iter.next() {
             match entry {
