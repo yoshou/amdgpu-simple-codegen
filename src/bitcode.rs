@@ -1260,6 +1260,211 @@ impl Bitcode {
         Ok(())
     }
 
+    fn parse_function_record(parser: &mut BitcodeModuleParser, record: &BitcodeRecord) -> Result<(), DecodeError> {
+        let mut iter = record.values.iter();
+        let name = Bitcode::get_string_from_strtab(parser, &mut iter)?;
+
+        let ty = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    if let Type::FunctionType(ty) = parser.types.get(*value as usize).unwrap() {
+                        ty.clone()
+                    } else {
+                        return Err(DecodeError { message: "Invalid function type".to_string() })
+                    }
+                }
+                _ => return Err(DecodeError { message: "Invalid function type value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing function type".to_string() });
+        };
+        
+        let calling_conv_id = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    *value as u32
+                }
+                _ => return Err(DecodeError { message: "Invalid function calling conv value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing function calling conv".to_string() });
+        };
+        
+        let is_proto = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    *value != 0
+                }
+                _ => return Err(DecodeError { message: "Invalid function calling conv value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing function calling conv".to_string() });
+        };
+        
+        let linkage = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    LinkageTypes::from_u64(*value).unwrap()
+                }
+                _ => return Err(DecodeError { message: "Invalid function linkage value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing function linkage".to_string() });
+        };
+        
+        let attributes = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    if *value > 0 {
+                        parser.attributes.get(*value as usize - 1).unwrap().clone()
+                    } else {
+                        AttributeList { attributes: vec![] } 
+                    }
+                }
+                _ => return Err(DecodeError { message: "Invalid function attributes value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing function attributes".to_string() });
+        };
+        
+        let alignment = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    if *value > 0 {
+                        Some(*value as u32 - 1)
+                    } else {
+                        None
+                    }
+                }
+                _ => return Err(DecodeError { message: "Invalid function alignment value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing function alignment".to_string() });
+        };
+        
+        let section = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    if *value > 0 {
+                        Some(*value - 1)
+                    } else {
+                        None
+                    }
+                }
+                _ => return Err(DecodeError { message: "Invalid function section value".to_string() })
+            }
+        } else {
+            return Err(DecodeError { message: "Missing function section".to_string() });
+        };
+
+        if let Some(_) = section {
+            unimplemented!();
+        }
+        
+        let visibility = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    VisibilityTypes::from_u64(*value).unwrap()
+                }
+                _ => return Err(DecodeError { message: "Invalid function visibility value".to_string() })
+            }
+        } else {
+            VisibilityTypes::Default
+        };
+        
+        let gc = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    if *value > 0 {
+                        Some(*value - 1)
+                    } else {
+                        None
+                    }
+                }
+                _ => return Err(DecodeError { message: "Invalid function section value".to_string() })
+            }
+        } else {
+            None
+        };
+
+        if let Some(_) = gc {
+            unimplemented!();
+        }
+        
+        let unnamed_addr = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    UnnamedAddr::from_u64(*value).unwrap()
+                }
+                _ => return Err(DecodeError { message: "Invalid function unnamed addr value".to_string() })
+            }
+        } else {
+            UnnamedAddr::None
+        };
+        
+        let prologue = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    if *value > 0 {
+                        Some(*value - 1)
+                    } else {
+                        None
+                    }
+                }
+                _ => return Err(DecodeError { message: "Invalid function prologue value".to_string() })
+            }
+        } else {
+            None
+        };
+
+        if let Some(_) = prologue {
+            unimplemented!();
+        }
+        
+        let dll_storage_class = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    DLLStorageClassTypes::from_u64(*value).unwrap()
+                }
+                _ => return Err(DecodeError { message: "Invalid function dll storage class value".to_string() })
+            }
+        } else {
+            DLLStorageClassTypes::Default
+        };
+
+        let comdat = if let Some(value) = iter.next() {
+            match value {
+                BitcodeValue::Value(value) => {
+                    if *value > 0 {
+                        parser.comdats.get(*value as usize - 1).map(|x| x.clone())
+                    } else {
+                        None
+                    }
+                }
+                _ => return Err(DecodeError { message: "Invalid function comdat value".to_string() })
+            }
+        } else {
+            None
+        };
+
+        let func = Function {
+            ty: ty,
+            linkage: linkage,
+            address_space: 0,
+            name: name,
+            attributes: attributes,
+            alignment: alignment,
+            visibility: visibility,
+            unnamed_address: unnamed_addr,
+            dll_storage_class: dll_storage_class,
+            comdat: comdat
+        };
+        
+        parser.values.push(Value::Function(func));
+    
+        Ok(())
+    }
+
     fn parse_module_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(&self, parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
         while let Some(entry) = iter.next() {
             match entry {
@@ -1276,6 +1481,9 @@ impl Bitcode {
                         }
                         7 => {
                             Bitcode::parse_globalvar_record(parser, record)?;
+                        }
+                        8 => {
+                            Bitcode::parse_function_record(parser, record)?;
                         }
                         12 => {
                             Bitcode::parse_comdat_record(parser, record)?;
