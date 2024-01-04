@@ -189,3 +189,89 @@ impl AttributeList {
         Some(merged_attributes)
     }
 }
+
+#[derive(Clone, Debug)]
+pub enum ComdatSelectionKind {
+    Any,
+    ExactMatch,
+    Largest,
+    NoDeduplicate,
+    SameSize,
+}
+
+#[derive(Clone, Debug)]
+pub struct Comdat {
+    pub name: String,
+    pub selection_kind: ComdatSelectionKind,
+}
+
+#[derive(Clone, Debug)]
+pub enum LinkageTypes {
+    External,
+    AvailableExternally,
+    LinkOnceAny,
+    LinkOnceODR,
+    WeakAny,
+    WeakODR,
+    Appending,
+    Internal,
+    Private,
+    ExternalWeak,
+    Common,
+}
+
+#[derive(Clone, Debug)]
+pub struct GlobalVariable {
+    pub ty: Type,
+    pub is_constant: bool,
+    pub linkage: LinkageTypes,
+    pub name: String,
+    pub initial_value: Option<Constant>,
+    pub thread_local_mode: ThreadLocalMode,
+    pub address_space: Option<u32>,
+    pub is_externally_initialized: bool,
+    pub visibility: VisibilityTypes,
+    pub unnamed_address: UnnamedAddr,
+    pub dll_storage_class: DLLStorageClassTypes,
+    pub alignment: u32,
+    pub comdat: Option<Comdat>,
+}
+
+#[derive(Clone, Debug)]
+pub enum VisibilityTypes {
+    Default,
+    Hidden,
+    Protected
+}
+
+#[derive(Clone, Debug)]
+pub enum ThreadLocalMode {
+    NotThreadLocal,
+    GeneralDynamicTLSModel,
+    LocalDynamicTLSModel,
+    InitialExecTLSModel,
+    LocalExecTLSModel,
+}
+
+#[derive(Clone, Debug)]
+pub enum UnnamedAddr {
+    None,
+    Local,
+    Global,
+}
+
+#[derive(Clone, Debug)]
+pub enum DLLStorageClassTypes {
+    Default,
+    DLLImport,
+    DLLExport,
+}
+
+#[derive(Clone, Debug)]
+pub enum Constant {
+}
+
+#[derive(Clone, Debug)]
+pub enum Value {
+    GlobalVariable(GlobalVariable)
+}
