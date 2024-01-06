@@ -1,7 +1,7 @@
 use std::env;
+use std::fs;
 use std::io::Read;
 use std::path;
-use std::fs;
 
 use amdgpu_simple_codegen::bitcode::*;
 
@@ -15,7 +15,7 @@ fn main() {
     let path = path::Path::new(&args[1]);
     let mut file = match fs::File::open(&path) {
         Ok(f) => f,
-        Err(err) => panic!("File error: {}", err)
+        Err(err) => panic!("File error: {}", err),
     };
 
     let mut data = Vec::<u8>::new();
@@ -28,6 +28,6 @@ fn main() {
     let bitcode = Bitcode::new(&data);
     let module = match bitcode.decode() {
         Ok(value) => value,
-        Err(err) => panic!("Decode bitcode error: {}", err.message)
+        Err(err) => panic!("Decode bitcode error: {}", err.message),
     };
 }
