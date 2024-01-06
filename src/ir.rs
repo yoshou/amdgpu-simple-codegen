@@ -1,27 +1,31 @@
 use std::collections::HashSet;
 
-pub struct Module {
-    
-}
+pub struct Module {}
 
 #[derive(Clone, Debug)]
 pub struct PointerType {
     pub address_space: u32,
-    pub pointee_type: Option<Box<Type>>
+    pub pointee_type: Option<Box<Type>>,
 }
 
 impl PointerType {
     pub fn new(address_space: u32, pointee_type: Type) -> Self {
-        PointerType { address_space: address_space, pointee_type: Some(Box::new(pointee_type)) }
+        PointerType {
+            address_space: address_space,
+            pointee_type: Some(Box::new(pointee_type)),
+        }
     }
     pub fn new_with_address_space(address_space: u32) -> Self {
-        PointerType { address_space: address_space, pointee_type: None }
+        PointerType {
+            address_space: address_space,
+            pointee_type: None,
+        }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct IntegerType {
-    pub num_bits: u32
+    pub num_bits: u32,
 }
 
 impl IntegerType {
@@ -33,15 +37,21 @@ impl IntegerType {
 #[derive(Clone, Debug)]
 pub struct StructType {
     pub name: String,
-    pub elements: Vec<Box<Type>>
+    pub elements: Vec<Box<Type>>,
 }
 
 impl StructType {
     pub fn new(name: String) -> Self {
-        StructType { name: name, elements: vec![] }
+        StructType {
+            name: name,
+            elements: vec![],
+        }
     }
     pub fn new_with_elements(name: String, elements: Vec<Box<Type>>) -> Self {
-        StructType { name: name, elements: elements }
+        StructType {
+            name: name,
+            elements: elements,
+        }
     }
 }
 
@@ -49,12 +59,16 @@ impl StructType {
 pub struct FunctionType {
     pub result: Box<Type>,
     pub params: Vec<Box<Type>>,
-    pub is_vararg: bool
+    pub is_vararg: bool,
 }
 
 impl FunctionType {
     pub fn new(result: Box<Type>, params: Vec<Box<Type>>, is_vararg: bool) -> Self {
-        FunctionType { result: result, params: params, is_vararg: is_vararg }
+        FunctionType {
+            result: result,
+            params: params,
+            is_vararg: is_vararg,
+        }
     }
 }
 
@@ -178,23 +192,36 @@ pub enum Attribute {
 
 #[derive(Clone, Debug)]
 pub struct AttributeList {
-    pub attributes: Vec<HashSet<Attribute>>
+    pub attributes: Vec<HashSet<Attribute>>,
 }
 
 impl AttributeList {
     pub fn merge(attributes_list: Vec<Self>) -> Option<Self> {
         let size = attributes_list.iter().map(|x| x.attributes.len()).max()?;
 
-        let mut merged_attributes = AttributeList { attributes: vec![HashSet::new(); size] };
+        let mut merged_attributes = AttributeList {
+            attributes: vec![HashSet::new(); size],
+        };
 
         for attributes in &attributes_list {
-            for (merged_attributes, attributes) in merged_attributes.attributes.iter_mut().zip(attributes.attributes[0..attributes.attributes.len() - 1].iter()) {
+            for (merged_attributes, attributes) in merged_attributes
+                .attributes
+                .iter_mut()
+                .zip(attributes.attributes[0..attributes.attributes.len() - 1].iter())
+            {
                 merged_attributes.extend(attributes.clone());
             }
-            merged_attributes.attributes.last_mut()
-                .and_then(|merged_attributes| attributes.attributes.last().map(|attributes| merged_attributes.extend(attributes.clone())));
+            merged_attributes
+                .attributes
+                .last_mut()
+                .and_then(|merged_attributes| {
+                    attributes
+                        .attributes
+                        .last()
+                        .map(|attributes| merged_attributes.extend(attributes.clone()))
+                });
         }
-        
+
         Some(merged_attributes)
     }
 }
@@ -250,7 +277,7 @@ pub struct GlobalVariable {
 pub enum VisibilityTypes {
     Default,
     Hidden,
-    Protected
+    Protected,
 }
 
 #[derive(Clone, Debug)]
@@ -277,8 +304,7 @@ pub enum DLLStorageClassTypes {
 }
 
 #[derive(Clone, Debug)]
-pub enum Constant {
-}
+pub enum Constant {}
 
 #[derive(Clone, Debug)]
 pub struct BasicBlock {
@@ -305,7 +331,7 @@ pub struct Function {
     pub dll_storage_class: DLLStorageClassTypes,
     pub comdat: Option<Comdat>,
     pub bbs: Vec<Rc<RefCell<BasicBlock>>>,
-    pub arguments: Vec<Rc<RefCell<Argument>>>
+    pub arguments: Vec<Rc<RefCell<Argument>>>,
 }
 
 use num_bigint::BigUint;
@@ -321,8 +347,8 @@ pub struct Undef {
     pub ty: Type,
 }
 
-use std::rc::{Rc, Weak};
 use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -338,35 +364,25 @@ pub enum Value {
 impl Value {
     pub fn ty(&self) -> Type {
         match self {
-            Self::Instruction(value) => {
-                match &*value.borrow() {
-                    Inst::CallInst(inst) => {
-                        match &inst.function_type {
-                            Type::FunctionType(ty) => *ty.result.clone(),
-                            _ => unimplemented!()
-                        }
-                    }
-                    Inst::GetElementPtrInst(inst) => inst.base_ptr.ty(),
-                    Inst::BinOpInst(inst) => inst.lhs.ty(),
-                    Inst::LoadInst(inst) => inst.ty.clone(),
-                    Inst::FCmpInst(_) => Type::IntegerType(IntegerType { num_bits: 1 }),
-                    Inst::ICmpInst(_) => Type::IntegerType(IntegerType { num_bits: 1 }),
-                    Inst::CastInst(inst) => inst.result_ty.clone(),
-                    Inst::BranchInst(_) => Type::VoidType,
-                    Inst::PhiInst(inst) => inst.ty.clone(),
-                    _ => unimplemented!()
-                }
-            }
-            Self::GlobalVariable(value) => {
-                value.borrow().ty.clone()
-            }
-            Self::ConstantInt(value) => {
-                value.borrow().ty.clone()
-            }
-            Self::Argument(value) => {
-                value.borrow().ty.clone()
-            }
-            _ => unimplemented!()
+            Self::Instruction(value) => match &*value.borrow() {
+                Inst::CallInst(inst) => match &inst.function_type {
+                    Type::FunctionType(ty) => *ty.result.clone(),
+                    _ => unimplemented!(),
+                },
+                Inst::GetElementPtrInst(inst) => inst.base_ptr.ty(),
+                Inst::BinOpInst(inst) => inst.lhs.ty(),
+                Inst::LoadInst(inst) => inst.ty.clone(),
+                Inst::FCmpInst(_) => Type::IntegerType(IntegerType { num_bits: 1 }),
+                Inst::ICmpInst(_) => Type::IntegerType(IntegerType { num_bits: 1 }),
+                Inst::CastInst(inst) => inst.result_ty.clone(),
+                Inst::BranchInst(_) => Type::VoidType,
+                Inst::PhiInst(inst) => inst.ty.clone(),
+                _ => unimplemented!(),
+            },
+            Self::GlobalVariable(value) => value.borrow().ty.clone(),
+            Self::ConstantInt(value) => value.borrow().ty.clone(),
+            Self::Argument(value) => value.borrow().ty.clone(),
+            _ => unimplemented!(),
         }
     }
 }
