@@ -1,4 +1,6 @@
 use crate::ir::*;
+use std::rc::*;
+use std::cell::*;
 
 pub fn is_bitcode(bytes: &[u8]) -> bool {
     if bytes.len() < 4 {
@@ -425,6 +427,7 @@ struct BitcodeModuleParser<'a> {
     values: Vec<Value>,
     global_inits: HashMap<usize, u64>,
     vst_offset: u64,
+    function_demanding_body_index: Option<usize>,
 }
 
 use either::*;
@@ -652,6 +655,129 @@ impl num::FromPrimitive for DLLStorageClassTypes {
             0 => Some(Self::Default),
             1 => Some(Self::DLLImport),
             2 => Some(Self::DLLExport),
+            _ => None
+        }
+    }
+}
+
+impl num::FromPrimitive for CastOpcode {
+    fn from_i64(value: i64) -> Option<Self> {
+        if value < 0 {
+            None
+        } else {
+            Self::from_u64(value as u64)
+        }
+    }
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            0 => Some(Self::Trunc),
+            1 => Some(Self::ZExt),
+            2 => Some(Self::SExt),
+            3 => Some(Self::FPToUI),
+            4 => Some(Self::FPToSI),
+            5 => Some(Self::UIToFP),
+            6 => Some(Self::SIToFP),
+            7 => Some(Self::FPTrunc),
+            8 => Some(Self::FPExt),
+            9 => Some(Self::PtrToInt),
+            10 => Some(Self::IntToPtr),
+            11 => Some(Self::BitCast),
+            12 => Some(Self::AddrSpaceCast),
+            _ => None
+        }
+    }
+}
+
+fn decode_binary_opcode(value: u64, ty: Type) -> Option<BinaryOpcode> {
+    let is_fp = ty.is_floating_point();
+    if is_fp {
+        match value {
+            0 => Some(BinaryOpcode::FAdd),
+            1 => Some(BinaryOpcode::FSub),
+            2 => Some(BinaryOpcode::FMul),
+            3 => None,
+            4 => Some(BinaryOpcode::FDiv),
+            5 => None,
+            6 => Some(BinaryOpcode::FRem),
+            7 => None,
+            8 => None,
+            9 => None,
+            10 => None,
+            11 => None,
+            12 => None,
+            _ => None
+        }
+    } else {
+        match value {
+            0 => Some(BinaryOpcode::Add),
+            1 => Some(BinaryOpcode::Sub),
+            2 => Some(BinaryOpcode::Mul),
+            3 => Some(BinaryOpcode::UDiv),
+            4 => Some(BinaryOpcode::SDiv),
+            5 => Some(BinaryOpcode::URem),
+            6 => Some(BinaryOpcode::SRem),
+            7 => Some(BinaryOpcode::Shl),
+            8 => Some(BinaryOpcode::LShr),
+            9 => Some(BinaryOpcode::AShr),
+            10 => Some(BinaryOpcode::And),
+            11 => Some(BinaryOpcode::Or),
+            12 => Some(BinaryOpcode::Xor),
+            _ => None
+        }
+    }
+}
+
+impl num::FromPrimitive for FCmpPredicate {
+    fn from_i64(value: i64) -> Option<Self> {
+        if value < 0 {
+            None
+        } else {
+            Self::from_u64(value as u64)
+        }
+    }
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            0 => Some(Self::FALSE),
+            1 => Some(Self::OEQ),
+            2 => Some(Self::OGT),
+            3 => Some(Self::OGE),
+            4 => Some(Self::OLT),
+            5 => Some(Self::OLE),
+            6 => Some(Self::ONE),
+            7 => Some(Self::ORD),
+            8 => Some(Self::UNO),
+            9 => Some(Self::UEQ),
+            10 => Some(Self::UGT),
+            11 => Some(Self::UGE),
+            12 => Some(Self::ULT),
+            13 => Some(Self::ULE),
+            14 => Some(Self::UNE),
+            15 => Some(Self::TRUE),
+            _ => None
+        }
+    }
+}
+
+impl num::FromPrimitive for ICmpPredicate {
+    fn from_i64(value: i64) -> Option<Self> {
+        if value < 0 {
+            None
+        } else {
+            Self::from_u64(value as u64)
+        }
+    }
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            32 => Some(Self::EQ),
+            33 => Some(Self::NE),
+            34 => Some(Self::UGT),
+            35 => Some(Self::UGE),
+            36 => Some(Self::ULT),
+            37 => Some(Self::ULE),
+            38 => Some(Self::SGT),
+            39 => Some(Self::SGE),
+            40 => Some(Self::SLT),
+            41 => Some(Self::SLE),
             _ => None
         }
     }
@@ -1074,13 +1200,13 @@ impl Bitcode {
                         }
                         2 => {
                             let const_value = match current_type {
-                                Type::IntegerType(_) => Value::ConstantInt(ConstantInt { ty: current_type.clone(), value: 0.to_biguint().unwrap() }),
+                                Type::IntegerType(_) => Value::ConstantInt(Rc::new(RefCell::new(ConstantInt { ty: current_type.clone(), value: 0.to_biguint().unwrap() }))),
                                 _ => return Err(DecodeError { message: "Type undefined null".to_string() })
                             };
                             value = Some(const_value);
                         }
                         3 => {
-                            value = Some(Value::Undef(Undef { ty: current_type.clone() }));
+                            value = Some(Value::Undef(Rc::new(RefCell::new(Undef { ty: current_type.clone() }))));
                         }
                         4 => {
                             let const_value = if let Some(value) = record.values.get(0) {
@@ -1102,7 +1228,7 @@ impl Bitcode {
                                 1u64 << 63
                             };
 
-                            value = Some(Value::ConstantInt(ConstantInt { ty: current_type.clone(), value: const_value.to_biguint().unwrap() }));
+                            value = Some(Value::ConstantInt(Rc::new(RefCell::new(ConstantInt { ty: current_type.clone(), value: const_value.to_biguint().unwrap() }))));
                         }
                         _ => {
                             unimplemented!();
@@ -1119,6 +1245,723 @@ impl Bitcode {
                 BitcodeEntry::DefineAbbrev(_) => {}
             }
         }
+        Ok(())
+    }
+
+    fn get_function_demanding_body(parser: &BitcodeModuleParser) -> Result<Rc<RefCell<Function>>, DecodeError> {
+        let function = parser.function_demanding_body_index.and_then(|index| parser.values.get(index))
+            .ok_or(DecodeError { message: "Missing function".to_string() })?;
+
+        if let Value::Function(value) = function {
+            Ok(value.clone())
+        } else {
+            panic!();
+        }
+    }
+
+    fn parse_function_block<'b, I: Iterator<Item = &'b BitcodeEntry>>(parser: &mut BitcodeModuleParser, iter: &mut I) -> Result<(), DecodeError> {
+        let function = Bitcode::get_function_demanding_body(parser)?;
+        for arg in &function.borrow_mut().arguments {
+            parser.values.push(Value::Argument(arg.clone()));
+        }
+
+        let mut lazy_assign = vec![];
+
+        let mut bb_idx = 0;
+        while let Some(entry) = iter.next() {
+            match entry {
+                BitcodeEntry::Record(record) => {
+                    match record.code {
+                        1 => { /* DECLAREBLOCKS */
+                            let size = if let Some(value) = record.values.get(0) {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value as usize
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid value type".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing value".to_string() })
+                            };
+
+                            function.borrow_mut().bbs.resize(size, Rc::new(RefCell::new(BasicBlock { insts: vec![] })));
+                        }
+                        2 => { /* INST_BINOP */
+                            let mut iter = record.values.iter();
+                            let lhs = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            value.clone()
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid operand value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing operand".to_string() });
+                            };
+
+                            let rhs = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            value.clone()
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid operand value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing operand".to_string() });
+                            };
+                            
+                            let opcode = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        decode_binary_opcode(*value, lhs.ty()).unwrap().clone()
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid opcode value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing opcode".to_string() });
+                            };
+
+                            let bb = &function.borrow_mut().bbs[bb_idx];
+                            let inst = Rc::new(RefCell::new(Inst::BinOpInst(BinOpInst {
+                                opcode: opcode,
+                                lhs: lhs,
+                                rhs: rhs,
+                            })));
+                            bb.borrow_mut().insts.push(inst.clone());
+                            parser.values.push(Value::Instruction(inst));
+                        }
+                        3 => { /* INST_CAST */
+                            let mut iter = record.values.iter();
+                            let operand = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            value.clone()
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid operand value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing operand".to_string() });
+                            };
+                            
+                            let ty = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        parser.types.get(*value as usize).unwrap().clone()
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid type value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing type".to_string() });
+                            };
+                            
+                            let opcode = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        CastOpcode::from_u64(*value).unwrap().clone()
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid opcode value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing opcode".to_string() });
+                            };
+
+                            let bb = &function.borrow_mut().bbs[bb_idx];
+                            let inst = Rc::new(RefCell::new(Inst::CastInst(CastInst {
+                                value: operand,
+                                result_ty: ty,
+                                opcode: opcode,
+                            })));
+                            bb.borrow_mut().insts.push(inst.clone());
+                            parser.values.push(Value::Instruction(inst));
+                        }
+                        10 => { /* INST_RET */
+                            if record.values.len() != 0 {
+                                unimplemented!();
+                            }
+                            let bb = &function.borrow_mut().bbs[bb_idx];
+                            let inst = Rc::new(RefCell::new(Inst::ReturnInst(ReturnInst {
+                                return_value: None,
+                            })));
+                            
+                            if inst.borrow().is_terminator() {
+                                bb_idx += 1;
+                            }
+
+                            bb.borrow_mut().insts.push(inst.clone());
+                        }
+                        11 => { /* INST_BR */
+                            let mut iter = record.values.iter();
+                            let true_cond = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = function.borrow().bbs.get(*value as usize) {
+                                            Rc::downgrade(value)
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid true cond value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing true cond".to_string() });
+                            };
+                            let false_cond = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = function.borrow().bbs.get(*value as usize) {
+                                            Some(Rc::downgrade(value))
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid false cond value".to_string() })
+                                }
+                            } else {
+                                None
+                            };
+                            let cond = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            Some(value.clone())
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid cond value".to_string() })
+                                }
+                            } else {
+                                None
+                            };
+
+                            let bb = &function.borrow_mut().bbs[bb_idx];
+                            let inst = Rc::new(RefCell::new(Inst::BranchInst(BranchInst {
+                                true_condition: true_cond,
+                                false_condition: false_cond.zip(cond),
+                            })));
+                            
+                            if inst.borrow().is_terminator() {
+                                bb_idx += 1;
+                            }
+
+                            bb.borrow_mut().insts.push(inst.clone());
+                        }
+                        16 => { /* INST_PHI */
+                            let ty = if let Some(value) = record.values.get(0) {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        parser.types.get(*value as usize).unwrap().clone()
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid type value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing type".to_string() });
+                            };
+
+                            let inst = Rc::new(RefCell::new(Inst::PhiInst(PhiInst {
+                                ty,
+                                incoming: vec![],
+                            })));
+
+                            let reference_value_index = parser.values.len();
+
+                            let bb = &function.borrow_mut().bbs[bb_idx];
+                            bb.borrow_mut().insts.push(inst.clone());
+                            parser.values.push(Value::Instruction(inst.clone()));
+                            
+                            let assign = move |parser: &mut BitcodeModuleParser| -> Result<(), DecodeError> {
+                                let function = Bitcode::get_function_demanding_body(parser)?;
+                                let values_iter = flatten_record_values(record).skip(1).step_by(2);
+                                let bbs_iter = flatten_record_values(record).skip(2).step_by(2);
+                                let values = values_iter.zip(bbs_iter).map(|(value, bb)| {
+                                    let value = match value {
+                                        BitcodeValue::Value(value) => {
+                                            let value = if (*value & 1) == 0 {
+                                                (*value >> 1) as i64
+                                            } else {
+                                                -((*value >> 1) as i64)
+                                            };
+                                            if let Some(value) = parser.values.get((reference_value_index as i64 - value) as usize) {
+                                                value.clone()
+                                            } else {
+                                                unimplemented!();
+                                            }
+                                        }
+                                        _ => return Err(DecodeError { message: "Invalid value".to_string() })
+                                    };
+                                    let bb = match bb {
+                                        BitcodeValue::Value(value) => {
+                                            if let Some(value) = function.borrow().bbs.get(*value as usize) {
+                                                Rc::downgrade(value)
+                                            } else {
+                                                unimplemented!();
+                                            }
+                                        }
+                                        _ => return Err(DecodeError { message: "Invalid basic block".to_string() })
+                                    };
+                                    Ok((bb, value))
+                                }).collect::<Result<Vec<_>, _>>()?;
+
+                                if let Inst::PhiInst(inst) = &mut *inst.borrow_mut() {
+                                    inst.incoming = values;
+                                }
+
+                                Ok(())
+                            };
+
+                            lazy_assign.push(assign);
+                        }
+                        20 => { /* INST_LOAD */
+                            let mut value_index = 0;
+                            let (operand, operand_type) = if let Some(value) = record.values.get(value_index) {
+                                value_index += 1;
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            (value.clone(), value.ty())
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid operand value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing operand".to_string() });
+                            };
+
+                            if let Type::PointerType(_) = operand_type {
+                            } else {
+                                return Err(DecodeError { message: "Invalid operand type".to_string() });
+                            }
+
+                            let ty = if value_index + 3 == record.values.len() {
+                                if let Some(value) = record.values.get(value_index) {
+                                    value_index += 1;
+                                    match value {
+                                        BitcodeValue::Value(value) => {
+                                            if let Some(value) = parser.types.get(*value as usize) {
+                                                value.clone()
+                                            } else {
+                                                return Err(DecodeError { message: "Invalid type".to_string() })
+                                            }
+                                        }
+                                        _ => return Err(DecodeError { message: "Invalid type value".to_string() })
+                                    }
+                                } else {
+                                    return Err(DecodeError { message: "Missing operand".to_string() });
+                                }
+                            } else {
+                                unimplemented!();
+                            };
+        
+                            let alignment = if let Some(value) = record.values.get(value_index) {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid alignment value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing alignment".to_string() });
+                            } - 1;
+        
+                            let volatile = if let Some(value) = record.values.get(value_index + 1) {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value != 0
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid volatile value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing volatile".to_string() });
+                            };
+
+                            let bb = &function.borrow_mut().bbs[bb_idx];
+                            let inst = Rc::new(RefCell::new(Inst::LoadInst(LoadInst { ty: ty, ptr: operand, name: "".to_string(), is_volatile: volatile, alignment: alignment as u32 })));
+                            bb.borrow_mut().insts.push(inst.clone());
+                            parser.values.push(Value::Instruction(inst));
+                        }
+                        28 => { /* INST_CMP */
+                            let mut iter = record.values.iter();
+                            let lhs = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            value.clone()
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid operand value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing operand".to_string() });
+                            };
+
+                            let rhs = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            value.clone()
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid operand value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing operand".to_string() });
+                            };
+                            
+                            let inst = if lhs.ty().is_floating_point() {
+                                let predicate = if let Some(value) = iter.next() {
+                                    match value {
+                                        BitcodeValue::Value(value) => {
+                                            FCmpPredicate::from_u64(*value).unwrap().clone()
+                                        }
+                                        _ => return Err(DecodeError { message: "Invalid predicate value".to_string() })
+                                    }
+                                } else {
+                                    return Err(DecodeError { message: "Missing predicate".to_string() });
+                                };
+                                Rc::new(RefCell::new(Inst::FCmpInst(FCmpInst {
+                                    predicate,
+                                    lhs,
+                                    rhs,
+                                })))
+                            } else {
+                                let predicate = if let Some(value) = iter.next() {
+                                    match value {
+                                        BitcodeValue::Value(value) => {
+                                            ICmpPredicate::from_u64(*value).unwrap().clone()
+                                        }
+                                        _ => return Err(DecodeError { message: "Invalid predicate value".to_string() })
+                                    }
+                                } else {
+                                    return Err(DecodeError { message: "Missing predicate".to_string() });
+                                };
+                                Rc::new(RefCell::new(Inst::ICmpInst(ICmpInst {
+                                    predicate,
+                                    lhs,
+                                    rhs,
+                                })))
+                            };
+
+                            let bb = &function.borrow_mut().bbs[bb_idx];
+                            bb.borrow_mut().insts.push(inst.clone());
+                            parser.values.push(Value::Instruction(inst));
+                        }
+                        34 => { /* CALL */
+                            let mut iter = record.values.iter();
+                            let attributes = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if *value > 0 {
+                                            parser.attributes.get(*value as usize - 1).unwrap().clone()
+                                        } else {
+                                            AttributeList { attributes: vec![] } 
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid function attributes value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing function attributes".to_string() });
+                            };
+        
+                            let cc_info = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid function cc info value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing function cc info".to_string() });
+                            };
+
+                            let fast_math_flags = if (cc_info >> 17) & 1 != 0 { /* Fast math flag */
+                                let mut fast_math_flags = FastMathFlags::empty();
+                                let value = if let Some(value) = iter.next() {
+                                    match value {
+                                        BitcodeValue::Value(value) => {
+                                            *value
+                                        }
+                                        _ => return Err(DecodeError { message: "Invalid fast math flags value".to_string() })
+                                    }
+                                } else {
+                                    return Err(DecodeError { message: "Missing fast math flags".to_string() });
+                                };
+                                if (value & (1 << 0)) != 0 {
+                                    fast_math_flags = FastMathFlags::all();
+                                } else if (value & (1 << 1)) != 0 {
+                                    fast_math_flags |= FastMathFlags::NoNaNs;
+                                } else if (value & (1 << 2)) != 0 {
+                                    fast_math_flags |= FastMathFlags::NoInfs;
+                                } else if (value & (1 << 3)) != 0 {
+                                    fast_math_flags |= FastMathFlags::NoSignedZeros;
+                                } else if (value & (1 << 4)) != 0 {
+                                    fast_math_flags |= FastMathFlags::AllowReciprocal;
+                                } else if (value & (1 << 5)) != 0 {
+                                    fast_math_flags |= FastMathFlags::AllowContract;
+                                } else if (value & (1 << 6)) != 0 {
+                                    fast_math_flags |= FastMathFlags::ApproxFunc;
+                                } else if (value & (1 << 7)) != 0 {
+                                    fast_math_flags |= FastMathFlags::AllowReassoc;
+                                }
+                                fast_math_flags
+                            } else {
+                                FastMathFlags::empty()
+                            };
+
+                            let function_type = if (cc_info >> 15) & 1 != 0 { /* Explicit type */
+                                if let Some(value) = iter.next() {
+                                    match value {
+                                        BitcodeValue::Value(value) => {
+                                            Some(parser.types.get(*value as usize).unwrap().clone())
+                                        }
+                                        _ => return Err(DecodeError { message: "Invalid type value".to_string() })
+                                    }
+                                } else {
+                                    return Err(DecodeError { message: "Missing type".to_string() });
+                                }
+                            } else {
+                                None
+                            };
+
+                            let callee = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        parser.values.get(parser.values.len() - *value as usize).unwrap().clone()
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid callee value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing callee".to_string() });
+                            };
+                            
+                            let function_type = if let Some(Type::FunctionType(ty)) = function_type {
+                                ty
+                            } else {
+                                return Err(DecodeError { message: "Missing function type".to_string() });
+                            };
+
+                            let args = function_type.params.iter().map(|param| {
+                                match **param {
+                                    Type::LabelType => {
+                                        if let Some(value) = iter.next() {
+                                            match value {
+                                                BitcodeValue::Value(value) => {
+                                                   Ok(Value::BasicBlock(function.borrow_mut().bbs[*value as usize].clone()))
+                                                }
+                                                _ => Err(DecodeError { message: "Invalid value".to_string() })
+                                            }
+                                        } else {
+                                            Err(DecodeError { message: "Missing value".to_string() })
+                                        }
+                                    }
+                                    _ => {
+                                        unimplemented!();
+                                    }
+                                }
+                            }).collect::<Result<Vec<_>, _>>()?;
+
+                            if !function_type.is_vararg {
+                                if !iter.next().is_none() {
+                                    return Err(DecodeError { message: "Invalid number of function arguments".to_string() });
+                                }
+                            } else {
+                                unimplemented!();
+                            }
+
+                            let bb = &function.borrow_mut().bbs[bb_idx];
+
+                            let inst = Rc::new(RefCell::new(Inst::CallInst(CallInst {
+                                function_type: Type::FunctionType(function_type),
+                                callee: callee,
+                                args: args,
+                                attributes: attributes.clone(),
+                            })));
+
+                            bb.borrow_mut().insts.push(inst.clone());
+                            parser.values.push(Value::Instruction(inst));
+                        }
+                        43 => { /* INST_GEP */
+                            let mut iter = flatten_record_values(record);
+                            let inbounds = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value != 0
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid inbounds value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing inbounds".to_string() });
+                            };
+                            
+                            let ty = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        parser.types.get(*value as usize).unwrap().clone()
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid type value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing type".to_string() });
+                            };
+
+                            let base_ptr = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            value.clone()
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid operand value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing operand".to_string() });
+                            };
+
+                            let indexes = iter.map(|value| {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            Ok(value.clone())
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => Err(DecodeError { message: "Invalid operand value".to_string() })
+                                }
+                            }).collect::<Result<Vec<_>, _>>()?;
+
+                            let bb = &function.borrow_mut().bbs[bb_idx];
+                            let inst = Rc::new(RefCell::new(Inst::GetElementPtrInst(GetElementPtrInst {
+                                ty: ty,
+                                base_ptr: base_ptr,
+                                indexes: indexes,
+                                inbounds: inbounds,
+                            })));
+                            bb.borrow_mut().insts.push(inst.clone());
+                            parser.values.push(Value::Instruction(inst));
+                        }
+                        44 => { /* INST_STORE */
+                            let mut iter = flatten_record_values(record);
+                            let ptr = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            value.clone()
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid pointer value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing pointer".to_string() });
+                            };
+
+                            let value = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        if let Some(value) = parser.values.get(parser.values.len() - *value as usize) {
+                                            value.clone()
+                                        } else {
+                                            unimplemented!();
+                                        }
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing value".to_string() });
+                            };
+        
+                            let alignment = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid alignment value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing alignment".to_string() });
+                            } - 1;
+        
+                            let volatile = if let Some(value) = iter.next() {
+                                match value {
+                                    BitcodeValue::Value(value) => {
+                                        *value != 0
+                                    }
+                                    _ => return Err(DecodeError { message: "Invalid volatile value".to_string() })
+                                }
+                            } else {
+                                return Err(DecodeError { message: "Missing volatile".to_string() });
+                            };
+
+                            let bb = &function.borrow_mut().bbs[bb_idx];
+                            let inst = Rc::new(RefCell::new(Inst::StoreInst(StoreInst {
+                                ptr,
+                                val: value,
+                                name: "".to_string(),
+                                is_volatile: volatile,
+                                alignment: alignment as u32,
+                            })));
+                            bb.borrow_mut().insts.push(inst.clone());
+                            parser.values.push(Value::Instruction(inst));
+                        }
+                        _ => {
+                            unimplemented!();
+                        }
+                    }
+                }
+                BitcodeEntry::Block(block) => {
+                    if let Some(id) = num::traits::FromPrimitive::from_u64(block.blockid) {
+                        match id {
+                            LLVMIRBlockID::Constant => {
+                                Bitcode::parse_constant_block(parser, iter)?;
+                            }
+                            LLVMIRBlockID::Metadata => {
+                                Bitcode::skip_block(iter)?;
+                            }
+                            LLVMIRBlockID::MetadataAttachment => {
+                                Bitcode::skip_block(iter)?;
+                            }
+                            _ => {
+                                unimplemented!();
+                            }
+                        }
+                    } else if block.blockid == 18 { /* USE_LIST */
+                        Bitcode::skip_block(iter)?;
+                    } else {
+                        return Err(DecodeError { message: "Unexpected block in function block".to_string() })
+                    };
+                }
+                BitcodeEntry::EndBlock => {
+                    break;
+                }
+                BitcodeEntry::DefineAbbrev(_) => {}
+            }
+        }
+
+        for assign in lazy_assign {
+            assign(parser)?;
+        }
+        
         Ok(())
     }
 
@@ -1334,7 +2177,7 @@ impl Bitcode {
             comdat: comdat.map(|x| x.clone()),
         };
         
-        parser.values.push(Value::GlobalVariable(global_var));
+        parser.values.push(Value::GlobalVariable(Rc::new(RefCell::new(global_var))));
 
         if let Some(init_id) = init_id {
             parser.global_inits.insert(parser.values.len() - 1, init_id);
@@ -1530,6 +2373,8 @@ impl Bitcode {
             None
         };
 
+        let args = (0..ty.params.len()).map(|i| Rc::new(RefCell::new(Argument {ty: *ty.params[i].clone(), name: "".to_string(), position: i}))).collect();
+
         let func = Function {
             ty: ty,
             linkage: linkage,
@@ -1540,10 +2385,16 @@ impl Bitcode {
             visibility: visibility,
             unnamed_address: unnamed_addr,
             dll_storage_class: dll_storage_class,
-            comdat: comdat
+            comdat: comdat,
+            bbs: vec![],
+            arguments: args,
         };
         
-        parser.values.push(Value::Function(func));
+        parser.values.push(Value::Function(Rc::new(RefCell::new(func))));
+
+        if !is_proto {
+            parser.function_demanding_body_index = Some(parser.values.len() - 1);
+        }
     
         Ok(())
     }
@@ -1598,6 +2449,12 @@ impl Bitcode {
                             }
                             LLVMIRBlockID::Constant => {
                                 Bitcode::parse_constant_block(parser, iter)?;
+                            }
+                            LLVMIRBlockID::Function => {
+                                Bitcode::parse_function_block(parser, iter)?;
+                            }
+                            LLVMIRBlockID::ValueSymtab => {
+                                Bitcode::skip_block(iter)?;
                             }
                             LLVMIRBlockID::Metadata => {
                                 Bitcode::skip_block(iter)?;
@@ -1703,6 +2560,7 @@ impl Bitcode {
             values: vec![],
             global_inits: HashMap::new(),
             vst_offset: 0,
+            function_demanding_body_index: None,
         };
 
         while let Some(entry) = iter.next() {

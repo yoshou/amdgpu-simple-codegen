@@ -71,6 +71,15 @@ pub enum Type {
     FunctionType(FunctionType),
 }
 
+impl Type {
+    pub fn is_floating_point(&self) -> bool {
+        match self {
+            Self::FloatType | Self::DoubleType => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Eq, Hash, PartialEq, Clone, Debug)]
 #[repr(u32)]
 pub enum AttributeKind {
@@ -272,6 +281,18 @@ pub enum Constant {
 }
 
 #[derive(Clone, Debug)]
+pub struct BasicBlock {
+    pub insts: Vec<Rc<RefCell<Inst>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Argument {
+    pub ty: Type,
+    pub name: String,
+    pub position: usize,
+}
+
+#[derive(Clone, Debug)]
 pub struct Function {
     pub ty: FunctionType,
     pub linkage: LinkageTypes,
@@ -283,6 +304,8 @@ pub struct Function {
     pub unnamed_address: UnnamedAddr,
     pub dll_storage_class: DLLStorageClassTypes,
     pub comdat: Option<Comdat>,
+    pub bbs: Vec<Rc<RefCell<BasicBlock>>>,
+    pub arguments: Vec<Rc<RefCell<Argument>>>
 }
 
 use num_bigint::BigUint;
@@ -298,12 +321,245 @@ pub struct Undef {
     pub ty: Type,
 }
 
+use std::rc::{Rc, Weak};
+use std::cell::RefCell;
+
 #[derive(Clone, Debug)]
 pub enum Value {
-    GlobalVariable(GlobalVariable),
-    Function(Function),
-    Undef(Undef),
-    ConstantInt(ConstantInt)
+    GlobalVariable(Rc<RefCell<GlobalVariable>>),
+    Function(Rc<RefCell<Function>>),
+    Undef(Rc<RefCell<Undef>>),
+    ConstantInt(Rc<RefCell<ConstantInt>>),
+    Argument(Rc<RefCell<Argument>>),
+    Instruction(Rc<RefCell<Inst>>),
+    BasicBlock(Rc<RefCell<BasicBlock>>),
+}
+
+impl Value {
+    pub fn ty(&self) -> Type {
+        match self {
+            Self::Instruction(value) => {
+                match &*value.borrow() {
+                    Inst::CallInst(inst) => {
+                        match &inst.function_type {
+                            Type::FunctionType(ty) => *ty.result.clone(),
+                            _ => unimplemented!()
+                        }
+                    }
+                    Inst::GetElementPtrInst(inst) => inst.base_ptr.ty(),
+                    Inst::BinOpInst(inst) => inst.lhs.ty(),
+                    Inst::LoadInst(inst) => inst.ty.clone(),
+                    Inst::FCmpInst(_) => Type::IntegerType(IntegerType { num_bits: 1 }),
+                    Inst::ICmpInst(_) => Type::IntegerType(IntegerType { num_bits: 1 }),
+                    Inst::CastInst(inst) => inst.result_ty.clone(),
+                    Inst::BranchInst(_) => Type::VoidType,
+                    Inst::PhiInst(inst) => inst.ty.clone(),
+                    _ => unimplemented!()
+                }
+            }
+            Self::GlobalVariable(value) => {
+                value.borrow().ty.clone()
+            }
+            Self::ConstantInt(value) => {
+                value.borrow().ty.clone()
+            }
+            Self::Argument(value) => {
+                value.borrow().ty.clone()
+            }
+            _ => unimplemented!()
+        }
+    }
+}
+
+impl Inst {
+    pub fn is_terminator(&self) -> bool {
+        match self {
+            Self::BranchInst(_) => true,
+            Self::ReturnInst(_) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum BinaryOpcode {
+    Add,
+    FAdd,
+    Sub,
+    FSub,
+    Mul,
+    FMul,
+    UDiv,
+    SDiv,
+    FDiv,
+    URem,
+    SRem,
+    FRem,
+    Shl,
+    LShr,
+    AShr,
+    And,
+    Or,
+    Xor,
+}
+
+#[derive(Clone, Debug)]
+pub struct BinOpInst {
+    pub opcode: BinaryOpcode,
+    pub lhs: Value,
+    pub rhs: Value,
+}
+
+#[derive(Clone, Debug)]
+pub enum ICmpPredicate {
+    EQ,
+    NE,
+    UGT,
+    UGE,
+    ULT,
+    ULE,
+    SGT,
+    SGE,
+    SLT,
+    SLE,
+}
+
+#[derive(Clone, Debug)]
+pub enum FCmpPredicate {
+    FALSE,
+    OEQ,
+    OGT,
+    OGE,
+    OLT,
+    OLE,
+    ONE,
+    ORD,
+    UNO,
+    UEQ,
+    UGT,
+    UGE,
+    ULT,
+    ULE,
+    UNE,
+    TRUE,
+}
+
+#[derive(Clone, Debug)]
+pub struct ICmpInst {
+    pub predicate: ICmpPredicate,
+    pub lhs: Value,
+    pub rhs: Value,
+}
+
+#[derive(Clone, Debug)]
+pub struct FCmpInst {
+    pub predicate: FCmpPredicate,
+    pub lhs: Value,
+    pub rhs: Value,
+}
+
+#[derive(Clone, Debug)]
+pub struct LoadInst {
+    pub ty: Type,
+    pub ptr: Value,
+    pub name: String,
+    pub is_volatile: bool,
+    pub alignment: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct StoreInst {
+    pub ptr: Value,
+    pub val: Value,
+    pub name: String,
+    pub is_volatile: bool,
+    pub alignment: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct BranchInst {
+    pub true_condition: Weak<RefCell<BasicBlock>>,
+    pub false_condition: Option<(Weak<RefCell<BasicBlock>>, Value)>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReturnInst {
+    pub return_value: Option<Value>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PhiInst {
+    pub ty: Type,
+    pub incoming: Vec<(Weak<RefCell<BasicBlock>>, Value)>,
+}
+
+#[derive(Clone, Debug)]
+pub enum CastOpcode {
+    Trunc,
+    ZExt,
+    SExt,
+    FPToUI,
+    FPToSI,
+    UIToFP,
+    SIToFP,
+    FPTrunc,
+    FPExt,
+    PtrToInt,
+    IntToPtr,
+    BitCast,
+    AddrSpaceCast,
+}
+
+#[derive(Clone, Debug)]
+pub struct CastInst {
+    pub value: Value,
+    pub opcode: CastOpcode,
+    pub result_ty: Type,
+}
+
+#[derive(Clone, Debug)]
+pub struct CallInst {
+    pub function_type: Type,
+    pub callee: Value,
+    pub args: Vec<Value>,
+    pub attributes: AttributeList,
+}
+
+#[derive(Clone, Debug)]
+pub struct GetElementPtrInst {
+    pub ty: Type,
+    pub base_ptr: Value,
+    pub indexes: Vec<Value>,
+    pub inbounds: bool,
+}
+
+#[derive(Clone, Debug)]
+pub enum Inst {
+    BinOpInst(BinOpInst),
+    ICmpInst(ICmpInst),
+    FCmpInst(FCmpInst),
+    BranchInst(BranchInst),
+    ReturnInst(ReturnInst),
+    PhiInst(PhiInst),
+    LoadInst(LoadInst),
+    StoreInst(StoreInst),
+    CastInst(CastInst),
+    CallInst(CallInst),
+    GetElementPtrInst(GetElementPtrInst),
+}
+
+use bitflags::bitflags;
+
+bitflags! {
+    pub struct FastMathFlags: u32 {
+        const AllowReassoc = (1 << 0);
+        const NoNaNs = (1 << 1);
+        const NoInfs = (1 << 2);
+        const NoSignedZeros = (1 << 3);
+        const AllowReciprocal = (1 << 4);
+        const AllowContract = (1 << 5);
+        const ApproxFunc = (1 << 6);
+    }
 }
 
 impl Function {
