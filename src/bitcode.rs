@@ -448,13 +448,12 @@ pub enum LLVMIRBlockID {
     Strtab = 23,
 }
 
-struct BitcodeModuleParser<'a> {
+struct BitcodeModuleParser {
     strtab: Vec<u8>,
     version: i32,
     triple: String,
     data_layout: String,
     source_filename: String,
-    module: &'a mut Module,
     types: Vec<Type>,
     attribute_groups: HashMap<u32, AttributeList>,
     attributes: Vec<AttributeList>,
@@ -3133,14 +3132,12 @@ impl Bitcode {
 
         let mut iter = entries.iter();
 
-        let mut module = Module {};
         let mut parser = BitcodeModuleParser {
             strtab: strtab,
             version: 0,
             triple: "".to_string(),
             data_layout: "".to_string(),
             source_filename: "".to_string(),
-            module: &mut module,
             types: vec![],
             attribute_groups: HashMap::new(),
             attributes: vec![],
@@ -3158,7 +3155,7 @@ impl Bitcode {
                     match id {
                         Some(LLVMIRBlockID::Module) => {
                             self.parse_module_block(&mut parser, &mut iter)?;
-                            return Ok(module);
+                            return Ok(Module { values: parser.values });
                         }
                         _ => {}
                     }

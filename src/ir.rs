@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
-pub struct Module {}
+pub struct Module {
+    pub values: Vec<Value>
+}
 
 #[derive(Clone, Debug)]
 pub struct PointerType {
