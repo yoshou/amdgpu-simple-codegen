@@ -2952,6 +2952,7 @@ impl Bitcode {
             ty: ty,
             linkage: linkage,
             address_space: 0,
+            calling_conv: calling_conv_id,
             name: name,
             attributes: attributes,
             alignment: alignment,

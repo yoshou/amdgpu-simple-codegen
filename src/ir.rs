@@ -325,6 +325,7 @@ pub struct Function {
     pub ty: FunctionType,
     pub linkage: LinkageTypes,
     pub address_space: u32,
+    pub calling_conv: u32,
     pub name: String,
     pub attributes: AttributeList,
     pub alignment: Option<u32>,
