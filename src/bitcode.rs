@@ -1373,6 +1373,7 @@ impl Bitcode {
                                     Value::ConstantInt(Rc::new(RefCell::new(ConstantInt {
                                         ty: current_type.clone(),
                                         value: 0.to_biguint().unwrap(),
+                                        name: ValueName::None,
                                     })))
                                 }
                                 _ => {
@@ -1415,6 +1416,7 @@ impl Bitcode {
                             value = Some(Value::ConstantInt(Rc::new(RefCell::new(ConstantInt {
                                 ty: current_type.clone(),
                                 value: const_value.to_biguint().unwrap(),
+                                name: ValueName::None,
                             }))));
                         }
                         _ => {
@@ -1573,9 +1575,10 @@ impl Bitcode {
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
                             let inst = Inst::BinOpInst(BinOpInst {
-                                opcode: opcode,
+                                opcode,
                                 lhs,
                                 rhs,
+                                name: ValueName::None,
                             });
                             let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
@@ -1644,7 +1647,8 @@ impl Bitcode {
                             let inst = Inst::CastInst(CastInst {
                                 value: operand,
                                 result_ty: ty,
-                                opcode: opcode,
+                                opcode,
+                                name: ValueName::None,
                             });
                             let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
@@ -1657,6 +1661,7 @@ impl Bitcode {
                             let bb = &function.borrow_mut().bbs[bb_idx];
                             let inst = Inst::ReturnInst(ReturnInst {
                                 return_value: None,
+                                name: ValueName::None,
                             });
 
                             if inst.is_terminator() {
@@ -1735,6 +1740,7 @@ impl Bitcode {
                             let inst = Inst::BranchInst(BranchInst {
                                 true_condition: true_cond,
                                 false_condition: false_cond.zip(cond),
+                                name: ValueName::None,
                             });
 
                             if inst.is_terminator() {
@@ -1765,6 +1771,7 @@ impl Bitcode {
                             let inst = Inst::PhiInst(PhiInst {
                                 ty,
                                 incoming: vec![],
+                                name: ValueName::None,
                             });
 
                             let reference_value_index = values.len();
@@ -1931,9 +1938,9 @@ impl Bitcode {
                             let inst = Inst::LoadInst(LoadInst {
                                 ty: ty,
                                 ptr: operand,
-                                name: "".to_string(),
                                 is_volatile: volatile,
                                 alignment: alignment as u32,
+                                name: ValueName::None,
                             });
                             let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
@@ -2008,6 +2015,7 @@ impl Bitcode {
                                     predicate,
                                     lhs,
                                     rhs,
+                                    name: ValueName::None,
                                 })
                             } else {
                                 let predicate = if let Some(value) = iter.next() {
@@ -2030,6 +2038,7 @@ impl Bitcode {
                                     predicate,
                                     lhs,
                                     rhs,
+                                    name: ValueName::None,
                                 })
                             };
 
@@ -2213,6 +2222,7 @@ impl Bitcode {
                                 callee: callee,
                                 args: args,
                                 attributes: attributes.clone(),
+                                name: ValueName::None,
                             });
 
                             let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
@@ -2300,6 +2310,7 @@ impl Bitcode {
                                     base_ptr: base_ptr,
                                     indexes: indexes,
                                     inbounds: inbounds,
+                                    name: ValueName::None,
                                 });
                             let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
@@ -2387,9 +2398,9 @@ impl Bitcode {
                             let inst = Inst::StoreInst(StoreInst {
                                 ptr,
                                 value,
-                                name: "".to_string(),
                                 is_volatile: volatile,
                                 alignment: alignment as u32,
+                                name: ValueName::None,
                             });
                             let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
@@ -2703,7 +2714,7 @@ impl Bitcode {
             ty: ty,
             is_constant: is_constant,
             linkage: linkage,
-            name: name,
+            name: ValueName::String(name),
             initial_value: None,
             thread_local_mode: thread_local,
             address_space: Some(address_space),
@@ -2974,7 +2985,7 @@ impl Bitcode {
             .map(|i| {
                 Rc::new(RefCell::new(Argument {
                     ty: *ty.params[i].clone(),
-                    name: "".to_string(),
+                    name: ValueName::None,
                     position: i,
                 }))
             })
@@ -2985,7 +2996,7 @@ impl Bitcode {
             linkage: linkage,
             address_space: 0,
             calling_conv: calling_conv_id,
-            name: name,
+            name: ValueName::String(name),
             attributes: attributes,
             alignment: alignment,
             visibility: visibility,

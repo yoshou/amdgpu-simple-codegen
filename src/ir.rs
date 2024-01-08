@@ -28,7 +28,7 @@ impl Module {
                     ty,
                     address_space: 0,
                     linkage: LinkageTypes::External,
-                    name: "llvm.amdgcn.kernarg.segment.ptr".to_string(),
+                    name: ValueName::String("llvm.amdgcn.kernarg.segment.ptr".to_string()),
                     arguments: vec![],
                     argument_values: vec![],
                     bbs: vec![],
@@ -231,6 +231,17 @@ impl DataLayout {
                 let info = &self.pointers.iter().find(|x| x.address_space == ty.address_space)?;
                 Some(info.abi_alignment)
             }
+            Type::IntegerType(ty) => {
+                let info = &self.int_alignments.iter().find(|x| x.type_bit_width == ty.num_bits)?;
+                Some(info.abi_alignment)
+            }
+            Type::FloatType => unimplemented!(),
+            Type::DoubleType => unimplemented!(),
+            Type::FunctionType(_) => unimplemented!(),
+            Type::LabelType => unimplemented!(),
+            Type::MetadataType => unimplemented!(),
+            Type::StructType(_) => unimplemented!(),
+            Type::VoidType => unimplemented!(),
             _ => None,
         }
     }
@@ -241,6 +252,17 @@ impl DataLayout {
                 let info = &self.pointers.iter().find(|x| x.address_space == ty.address_space)?;
                 Some(info.type_bit_width)
             }
+            Type::IntegerType(ty) => {
+                let info = &self.int_alignments.iter().find(|x| x.type_bit_width == ty.num_bits)?;
+                Some(info.type_bit_width)
+            }
+            Type::FloatType => unimplemented!(),
+            Type::DoubleType => unimplemented!(),
+            Type::FunctionType(_) => unimplemented!(),
+            Type::LabelType => unimplemented!(),
+            Type::MetadataType => unimplemented!(),
+            Type::StructType(_) => unimplemented!(),
+            Type::VoidType => unimplemented!(),
             _ => None,
         }
     }
@@ -517,7 +539,7 @@ pub struct GlobalVariable {
     pub ty: Type,
     pub is_constant: bool,
     pub linkage: LinkageTypes,
-    pub name: String,
+    pub name: ValueName,
     pub initial_value: Option<Constant>,
     pub thread_local_mode: ThreadLocalMode,
     pub address_space: Option<u32>,
@@ -592,12 +614,12 @@ impl BasicBlock {
         position: Option<&ValueRef>,
         func: ValueRef,
         args: Vec<ValueRef>,
-        name: String,
+        name: ValueName,
     ) -> Option<ValueRef> {
         let function_type = func.upgrade().unwrap().borrow().ty().clone();
 
         let position = if let Some(position) = position {
-            self.position(position)?
+            self.position(position)? + 1
         } else {
             0
         };
@@ -607,6 +629,7 @@ impl BasicBlock {
             function_type,
             callee: func,
             attributes: AttributeList { attributes: vec![] },
+            name,
         }));
 
         Some(value)
@@ -618,10 +641,10 @@ impl BasicBlock {
         ty: Type,
         ptr: ValueRef,
         index: ValueRef,
-        name: String,
+        name: ValueName,
     ) -> Option<ValueRef> {
         let position = if let Some(position) = position {
-            self.position(position)?
+            self.position(position)? + 1
         } else {
             0
         };
@@ -631,6 +654,7 @@ impl BasicBlock {
             base_ptr: ptr,
             ty: ty,
             indexes: vec![index],
+            name,
         }));
 
         Some(value)
@@ -643,10 +667,10 @@ impl BasicBlock {
         ptr: ValueRef,
         alignment: u32,
         is_volatile: bool,
-        name: String,
+        name: ValueName,
     ) -> Option<ValueRef> {
         let position = if let Some(position) = position {
-            self.position(position)?
+            self.position(position)? + 1
         } else {
             0
         };
@@ -666,7 +690,7 @@ impl BasicBlock {
 #[derive(Clone, Debug)]
 pub struct Argument {
     pub ty: Type,
-    pub name: String,
+    pub name: ValueName,
     pub position: usize,
 }
 
@@ -676,7 +700,7 @@ pub struct Function {
     pub linkage: LinkageTypes,
     pub address_space: u32,
     pub calling_conv: u32,
-    pub name: String,
+    pub name: ValueName,
     pub attributes: AttributeList,
     pub alignment: Option<u32>,
     pub visibility: VisibilityTypes,
@@ -695,6 +719,7 @@ use num_bigint::BigUint;
 pub struct ConstantInt {
     pub ty: Type,
     pub value: BigUint,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
@@ -742,22 +767,22 @@ impl Value {
         }
     }
 
-    pub fn name(&self) -> String {
+    pub fn name<'a>(&'a self) -> ValueName {
         match self {
             Self::Instruction(value) => match &*value.borrow() {
-                Inst::CallInst(inst) => todo!(),
-                Inst::GetElementPtrInst(inst) => todo!(),
-                Inst::BinOpInst(inst) => todo!(),
+                Inst::CallInst(inst) => inst.name.clone(),
+                Inst::GetElementPtrInst(inst) => inst.name.clone(),
+                Inst::BinOpInst(inst) => inst.name.clone(),
                 Inst::LoadInst(inst) => inst.name.clone(),
-                Inst::FCmpInst(_) => todo!(),
-                Inst::ICmpInst(_) => todo!(),
-                Inst::CastInst(inst) => todo!(),
-                Inst::BranchInst(_) => todo!(),
-                Inst::PhiInst(inst) => todo!(),
+                Inst::FCmpInst(inst) => inst.name.clone(),
+                Inst::ICmpInst(inst) => inst.name.clone(),
+                Inst::CastInst(inst) => inst.name.clone(),
+                Inst::BranchInst(inst) => inst.name.clone(),
+                Inst::PhiInst(inst) => inst.name.clone(),
                 _ => unimplemented!(),
             },
             Self::GlobalVariable(value) => value.borrow().name.clone(),
-            Self::ConstantInt(value) => todo!(),
+            Self::ConstantInt(value) => value.borrow().name.clone(),
             Self::Argument(value) => value.borrow().name.clone(),
             _ => unimplemented!(),
         }
@@ -767,12 +792,19 @@ impl Value {
 pub type BasicBlockRef = Weak<RefCell<BasicBlock>>;
 pub type ValueRef = Weak<RefCell<Value>>;
 
-impl Inst {
-    pub fn is_terminator(&self) -> bool {
+#[derive(Clone)]
+pub enum ValueName {
+    None,
+    String(String),
+    Postfix(Value, String),
+}
+
+impl std::fmt::Debug for ValueName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::BranchInst(_) => true,
-            Self::ReturnInst(_) => true,
-            _ => false,
+            Self::None => write!(f, "None"),
+            Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
+            Self::Postfix(_, arg1) => f.debug_tuple("Postfix").field(&"(Value)".to_owned()).field(arg1).finish(),
         }
     }
 }
@@ -804,6 +836,7 @@ pub struct BinOpInst {
     pub opcode: BinaryOpcode,
     pub lhs: ValueRef,
     pub rhs: ValueRef,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
@@ -845,6 +878,7 @@ pub struct ICmpInst {
     pub predicate: ICmpPredicate,
     pub lhs: ValueRef,
     pub rhs: ValueRef,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
@@ -852,41 +886,45 @@ pub struct FCmpInst {
     pub predicate: FCmpPredicate,
     pub lhs: ValueRef,
     pub rhs: ValueRef,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
 pub struct LoadInst {
     pub ty: Type,
     pub ptr: ValueRef,
-    pub name: String,
     pub is_volatile: bool,
     pub alignment: u32,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
 pub struct StoreInst {
     pub ptr: ValueRef,
     pub value: ValueRef,
-    pub name: String,
     pub is_volatile: bool,
     pub alignment: u32,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
 pub struct BranchInst {
     pub true_condition: BasicBlockRef,
     pub false_condition: Option<(BasicBlockRef, ValueRef)>,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
 pub struct ReturnInst {
     pub return_value: Option<ValueRef>,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
 pub struct PhiInst {
     pub ty: Type,
     pub incoming: Vec<(BasicBlockRef, ValueRef)>,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
@@ -911,6 +949,7 @@ pub struct CastInst {
     pub value: ValueRef,
     pub opcode: CastOpcode,
     pub result_ty: Type,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
@@ -919,6 +958,7 @@ pub struct CallInst {
     pub callee: ValueRef,
     pub args: Vec<ValueRef>,
     pub attributes: AttributeList,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
@@ -927,6 +967,7 @@ pub struct GetElementPtrInst {
     pub base_ptr: ValueRef,
     pub indexes: Vec<ValueRef>,
     pub inbounds: bool,
+    pub name: ValueName,
 }
 
 #[derive(Clone, Debug)]
@@ -942,6 +983,16 @@ pub enum Inst {
     CastInst(CastInst),
     CallInst(CallInst),
     GetElementPtrInst(GetElementPtrInst),
+}
+
+impl Inst {
+    pub fn is_terminator(&self) -> bool {
+        match self {
+            Self::BranchInst(_) => true,
+            Self::ReturnInst(_) => true,
+            _ => false,
+        }
+    }
 }
 
 use bitflags::bitflags;
