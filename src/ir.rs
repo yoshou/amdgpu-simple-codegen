@@ -221,6 +221,32 @@ impl DataLayout {
             non_integral_address_spaces,
         })
     }
+
+    pub fn get_abi_alignment_by_type(&self, ty: &Type) -> Option<u32> {
+        match ty {
+            Type::PointerType(ty) => {
+                let info = &self.pointers.iter().find(|x| x.address_space == ty.address_space)?;
+                Some(info.abi_alignment)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn get_type_size_in_bits(&self, ty: &Type) -> Option<u32> {
+        match ty {
+            Type::PointerType(ty) => {
+                let info = &self.pointers.iter().find(|x| x.address_space == ty.address_space)?;
+                Some(info.type_bit_width)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn get_type_alloc_size(&self, ty: &Type) -> Option<u32> {
+        let storage_size = (self.get_type_size_in_bits(ty)? + 7) / 8;
+        let alignment = self.get_abi_alignment_by_type(ty)?;
+        Some(((storage_size + alignment - 1) / alignment) * alignment)
+    }
 }
 
 #[derive(Clone, Debug)]
