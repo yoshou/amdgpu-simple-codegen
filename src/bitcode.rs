@@ -3156,7 +3156,18 @@ impl Bitcode {
                     match id {
                         Some(LLVMIRBlockID::Module) => {
                             self.parse_module_block(&mut parser, &mut iter)?;
-                            return Ok(Module { values: parser.values });
+                            let data_layout =
+                                if let Some(value) = DataLayout::parse(&parser.data_layout) {
+                                    value
+                                } else {
+                                    return Err(DecodeError {
+                                        message: "Invalid data layout description".to_string(),
+                                    });
+                                };
+                            return Ok(Module {
+                                values: parser.values,
+                                data_layout,
+                            });
                         }
                         _ => {}
                     }

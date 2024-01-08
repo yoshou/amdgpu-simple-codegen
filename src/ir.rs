@@ -1,7 +1,228 @@
 use std::collections::HashSet;
 
 pub struct Module {
-    pub values: Vec<Value>
+    pub data_layout: DataLayout,
+    pub values: Vec<Value>,
+}
+
+impl Module {
+    pub fn create_or_declar_intrinsic(
+        &mut self,
+        id: &str,
+        types: &Vec<Type>,
+    ) -> Option<Rc<RefCell<Function>>> {
+        match id {
+            "amdgcn_kernarg_segment_ptr" => {
+                let ty = FunctionType {
+                    result: Box::new(Type::PointerType(PointerType {
+                        pointee_type: Some(Box::new(Type::IntegerType(IntegerType {
+                            num_bits: 8,
+                        }))),
+                        address_space: 4,
+                    })),
+                    params: vec![],
+                    is_vararg: false,
+                };
+
+                let func = Rc::new(RefCell::new(Function {
+                    ty,
+                    address_space: 0,
+                    linkage: LinkageTypes::External,
+                    name: "llvm.amdgcn.kernarg.segment.ptr".to_string(),
+                    arguments: vec![],
+                    bbs: vec![],
+                    alignment: None,
+                    calling_conv: 0,
+                    attributes: AttributeList { attributes: vec![] },
+                    visibility: VisibilityTypes::Default,
+                    unnamed_address: UnnamedAddr::None,
+                    dll_storage_class: DLLStorageClassTypes::Default,
+                    comdat: None,
+                }));
+                self.values.push(Value::Function(func.clone()));
+                Some(func)
+            }
+            _ => None,
+        }
+    }
+}
+
+type Align = Option<u32>;
+
+pub struct PointerAlignment {
+    pub abi_alignment: Align,
+    pub preferred_alignment: Align,
+    pub type_bit_width: u32,
+    pub address_space: u32,
+    pub index_bit_width: u32,
+}
+
+pub enum AlignType {
+    Integer,
+    Vector,
+    Float,
+    Aggrigate,
+}
+
+pub struct LayoutAlignment {
+    pub type_bit_width: u32,
+    pub abi_alignment: Align,
+    pub preferred_alignment: Align,
+}
+
+pub struct DataLayout {
+    pub big_endian: bool,
+    pub pointers: Vec<PointerAlignment>,
+    pub int_alignments: Vec<LayoutAlignment>,
+    pub float_alignments: Vec<LayoutAlignment>,
+    pub vector_alignments: Vec<LayoutAlignment>,
+    pub struct_alignments: Vec<LayoutAlignment>,
+    pub legal_int_widths: Vec<u32>,
+    pub stack_natural_alignment: Option<u32>,
+    pub alloca_address_space: u32,
+    pub default_global_address_space: u32,
+    pub non_integral_address_spaces: Vec<u32>,
+}
+
+impl DataLayout {
+    pub fn parse(desc: &String) -> Option<DataLayout> {
+        let mut big_endian = false;
+        let mut pointers = vec![];
+        let mut int_alignments = vec![];
+        let mut float_alignments = vec![];
+        let mut vector_alignments = vec![];
+        let mut struct_alignments = vec![];
+        let mut legal_int_widths = vec![];
+        let mut stack_natural_alignment = None;
+        let mut alloca_address_space = 0;
+        let mut default_global_address_space = 0;
+        let mut non_integral_address_spaces = vec![];
+
+        for x in desc.split('-') {
+            let (token, rest) = if let Some(values) = x.split_once(':') {
+                values
+            } else {
+                (x, "")
+            };
+
+            match &token.chars().collect::<Vec<_>>()[..] {
+                ['n', 'i'] => {
+                    let values = rest
+                        .splitn(2, ':')
+                        .map(|x| x.parse::<u32>())
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()?;
+                    
+                    non_integral_address_spaces.extend(values);
+                }
+                ['e'] => big_endian = true,
+                ['E'] => big_endian = false,
+                ['p', token @ ..] => {
+                    let address_space = if token.len() == 0 {
+                        0
+                    } else {
+                        token.iter().collect::<String>().parse::<u32>().unwrap()
+                    };
+
+                    let values = rest
+                        .splitn(2, ':')
+                        .map(|x| x.parse::<u32>())
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()?;
+
+                    let (mem_size, abi_alignment, pref_alignment, index_size) = match values[..] {
+                        [mem_size, abi_alignment] => {
+                            (mem_size, abi_alignment, abi_alignment, mem_size)
+                        }
+                        [mem_size, abi_alignment, pref_alignment] => {
+                            (mem_size, abi_alignment, pref_alignment, mem_size)
+                        }
+                        [mem_size, abi_alignment, pref_alignment, index_size] => {
+                            (mem_size, abi_alignment, pref_alignment, index_size)
+                        }
+                        _ => panic!(),
+                    };
+                    pointers.push(PointerAlignment {
+                        address_space: address_space,
+                        type_bit_width: mem_size,
+                        abi_alignment: Some(abi_alignment),
+                        preferred_alignment: Some(pref_alignment),
+                        index_bit_width: index_size,
+                    });
+                }
+                [ty @ ('i' | 'v' | 'f' | 'a'), token @ ..] => {
+                    let bit_size = if token.len() == 0 {
+                        0
+                    } else {
+                        token.iter().collect::<String>().parse::<u32>().unwrap()
+                    };
+
+                    let values = rest
+                        .splitn(2, ':')
+                        .map(|x| x.parse::<u32>())
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()?;
+
+                    let (abi_alignment, pref_alignment) = match values[..] {
+                        [abi_alignment] => (abi_alignment, abi_alignment),
+                        [abi_alignment, pref_alignment] => (abi_alignment, pref_alignment),
+                        _ => panic!(),
+                    };
+
+                    let alignments = match ty {
+                        'i' => &mut int_alignments,
+                        'v' => &mut vector_alignments,
+                        'f' => &mut float_alignments,
+                        'a' => &mut struct_alignments,
+                        _ => panic!(),
+                    };
+                    alignments.push(LayoutAlignment {
+                        type_bit_width: bit_size,
+                        abi_alignment: Some(abi_alignment),
+                        preferred_alignment: Some(pref_alignment),
+                    });
+                }
+                ['n', token @ ..] => {
+                    let value = token.iter().collect::<String>().parse::<u32>().ok()?;
+                    
+                    legal_int_widths.push(value);
+
+                    let values = rest
+                        .splitn(2, ':')
+                        .map(|x| x.parse::<u32>())
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()?;
+                    
+                    legal_int_widths.extend(values);
+                }
+                ['S', token @ ..] => {
+                    let value = token.iter().collect::<String>().parse::<u32>().ok()?;
+                    
+                    stack_natural_alignment = Some(value);
+                }
+                ['A', token @ ..] => {
+                    alloca_address_space = token.iter().collect::<String>().parse::<u32>().ok()?;
+                }
+                ['G', token @ ..] => {
+                    default_global_address_space = token.iter().collect::<String>().parse::<u32>().ok()?;
+                }
+                _ => unimplemented!(),
+            }
+        }
+        Some(DataLayout {
+            big_endian,
+            pointers,
+            int_alignments,
+            vector_alignments,
+            float_alignments,
+            struct_alignments,
+            legal_int_widths,
+            stack_natural_alignment,
+            alloca_address_space,
+            default_global_address_space,
+            non_integral_address_spaces,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
