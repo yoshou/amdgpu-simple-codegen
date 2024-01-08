@@ -64,8 +64,8 @@ pub enum AlignType {
 
 pub struct LayoutAlignment {
     pub type_bit_width: u32,
-    pub abi_alignment: Align,
-    pub preferred_alignment: Align,
+    pub abi_alignment: u32,
+    pub preferred_alignment: u32,
 }
 
 pub struct DataLayout {
@@ -143,8 +143,8 @@ impl DataLayout {
                     pointers.push(PointerAlignment {
                         address_space: address_space,
                         type_bit_width: mem_size,
-                        abi_alignment: abi_alignment,
-                        preferred_alignment: pref_alignment,
+                        abi_alignment: abi_alignment / 8,
+                        preferred_alignment: pref_alignment / 8,
                         index_bit_width: index_size,
                     });
                 }
@@ -176,8 +176,8 @@ impl DataLayout {
                     };
                     alignments.push(LayoutAlignment {
                         type_bit_width: bit_size,
-                        abi_alignment: Some(abi_alignment),
-                        preferred_alignment: Some(pref_alignment),
+                        abi_alignment: abi_alignment / 8,
+                        preferred_alignment: pref_alignment / 8,
                     });
                 }
                 ['n', token @ ..] => {
