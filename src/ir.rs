@@ -6,11 +6,7 @@ pub struct Module {
 }
 
 impl Module {
-    pub fn create_or_declar_intrinsic(
-        &mut self,
-        id: &str,
-        types: &Vec<Type>,
-    ) -> Option<ValueRef> {
+    pub fn create_or_declar_intrinsic(&mut self, id: &str, types: &Vec<Type>) -> Option<ValueRef> {
         match id {
             "amdgcn_kernarg_segment_ptr" => {
                 let ty = FunctionType {
@@ -113,7 +109,7 @@ impl DataLayout {
                         .map(|x| x.parse::<u32>())
                         .collect::<Result<Vec<_>, _>>()
                         .ok()?;
-                    
+
                     non_integral_address_spaces.extend(values);
                 }
                 ['e'] => big_endian = true,
@@ -185,7 +181,7 @@ impl DataLayout {
                 }
                 ['n', token @ ..] => {
                     let value = token.iter().collect::<String>().parse::<u32>().ok()?;
-                    
+
                     legal_int_widths.push(value);
 
                     let values = rest
@@ -193,19 +189,20 @@ impl DataLayout {
                         .map(|x| x.parse::<u32>())
                         .collect::<Result<Vec<_>, _>>()
                         .ok()?;
-                    
+
                     legal_int_widths.extend(values);
                 }
                 ['S', token @ ..] => {
                     let value = token.iter().collect::<String>().parse::<u32>().ok()?;
-                    
+
                     stack_natural_alignment = Some(value);
                 }
                 ['A', token @ ..] => {
                     alloca_address_space = token.iter().collect::<String>().parse::<u32>().ok()?;
                 }
                 ['G', token @ ..] => {
-                    default_global_address_space = token.iter().collect::<String>().parse::<u32>().ok()?;
+                    default_global_address_space =
+                        token.iter().collect::<String>().parse::<u32>().ok()?;
                 }
                 _ => unimplemented!(),
             }
@@ -228,11 +225,17 @@ impl DataLayout {
     pub fn get_abi_alignment_by_type(&self, ty: &Type) -> Option<u32> {
         match ty {
             Type::PointerType(ty) => {
-                let info = &self.pointers.iter().find(|x| x.address_space == ty.address_space)?;
+                let info = &self
+                    .pointers
+                    .iter()
+                    .find(|x| x.address_space == ty.address_space)?;
                 Some(info.abi_alignment)
             }
             Type::IntegerType(ty) => {
-                let info = &self.int_alignments.iter().find(|x| x.type_bit_width == ty.num_bits)?;
+                let info = &self
+                    .int_alignments
+                    .iter()
+                    .find(|x| x.type_bit_width == ty.num_bits)?;
                 Some(info.abi_alignment)
             }
             Type::FloatType => unimplemented!(),
@@ -249,11 +252,17 @@ impl DataLayout {
     pub fn get_type_size_in_bits(&self, ty: &Type) -> Option<u32> {
         match ty {
             Type::PointerType(ty) => {
-                let info = &self.pointers.iter().find(|x| x.address_space == ty.address_space)?;
+                let info = &self
+                    .pointers
+                    .iter()
+                    .find(|x| x.address_space == ty.address_space)?;
                 Some(info.type_bit_width)
             }
             Type::IntegerType(ty) => {
-                let info = &self.int_alignments.iter().find(|x| x.type_bit_width == ty.num_bits)?;
+                let info = &self
+                    .int_alignments
+                    .iter()
+                    .find(|x| x.type_bit_width == ty.num_bits)?;
                 Some(info.type_bit_width)
             }
             Type::FloatType => unimplemented!(),
@@ -591,7 +600,11 @@ pub struct BasicBlock {
 }
 
 impl BasicBlock {
-    pub fn insert_instruction(&mut self, index: usize, inst: Inst) -> (ValueRef, Weak<RefCell<Inst>>) {
+    pub fn insert_instruction(
+        &mut self,
+        index: usize,
+        inst: Inst,
+    ) -> (ValueRef, Weak<RefCell<Inst>>) {
         let inst = Rc::new(RefCell::new(inst));
         let inst_ref = Rc::downgrade(&inst);
         self.insts.insert(index, Rc::downgrade(&inst));
@@ -600,13 +613,15 @@ impl BasicBlock {
         self.inst_values.insert(index, value);
         (value_ref, inst_ref)
     }
-    
+
     pub fn push_instruction(&mut self, inst: Inst) -> (ValueRef, Weak<RefCell<Inst>>) {
         self.insert_instruction(self.insts.len(), inst)
     }
 
     pub fn position(&self, value: &ValueRef) -> Option<usize> {
-        self.inst_values.iter().position(|x| x.as_ptr() == value.upgrade().unwrap().as_ptr())
+        self.inst_values
+            .iter()
+            .position(|x| x.as_ptr() == value.upgrade().unwrap().as_ptr())
     }
 
     pub fn create_call(
@@ -624,13 +639,16 @@ impl BasicBlock {
             0
         };
 
-        let (value, _) = self.insert_instruction(position, Inst::CallInst(CallInst {
-            args,
-            function_type,
-            callee: func,
-            attributes: AttributeList { attributes: vec![] },
-            name,
-        }));
+        let (value, _) = self.insert_instruction(
+            position,
+            Inst::CallInst(CallInst {
+                args,
+                function_type,
+                callee: func,
+                attributes: AttributeList { attributes: vec![] },
+                name,
+            }),
+        );
 
         Some(value)
     }
@@ -649,13 +667,16 @@ impl BasicBlock {
             0
         };
 
-        let (value, _) = self.insert_instruction(position, Inst::GetElementPtrInst(GetElementPtrInst {
-            inbounds: true,
-            base_ptr: ptr,
-            ty: ty,
-            indexes: vec![index],
-            name,
-        }));
+        let (value, _) = self.insert_instruction(
+            position,
+            Inst::GetElementPtrInst(GetElementPtrInst {
+                inbounds: true,
+                base_ptr: ptr,
+                ty: ty,
+                indexes: vec![index],
+                name,
+            }),
+        );
 
         Some(value)
     }
@@ -675,13 +696,16 @@ impl BasicBlock {
             0
         };
 
-        let (value, _) = self.insert_instruction(position, Inst::LoadInst(LoadInst {
-            ptr,
-            ty,
-            alignment,
-            is_volatile,
-            name,
-        }));
+        let (value, _) = self.insert_instruction(
+            position,
+            Inst::LoadInst(LoadInst {
+                ptr,
+                ty,
+                alignment,
+                is_volatile,
+                name,
+            }),
+        );
 
         Some(value)
     }
@@ -804,7 +828,11 @@ impl std::fmt::Debug for ValueName {
         match self {
             Self::None => write!(f, "None"),
             Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
-            Self::Postfix(_, arg1) => f.debug_tuple("Postfix").field(&"(Value)".to_owned()).field(arg1).finish(),
+            Self::Postfix(_, arg1) => f
+                .debug_tuple("Postfix")
+                .field(&"(Value)".to_owned())
+                .field(arg1)
+                .finish(),
         }
     }
 }
