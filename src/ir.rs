@@ -47,11 +47,9 @@ impl Module {
     }
 }
 
-type Align = Option<u32>;
-
 pub struct PointerAlignment {
-    pub abi_alignment: Align,
-    pub preferred_alignment: Align,
+    pub abi_alignment: u32,
+    pub preferred_alignment: u32,
     pub type_bit_width: u32,
     pub address_space: u32,
     pub index_bit_width: u32,
@@ -145,8 +143,8 @@ impl DataLayout {
                     pointers.push(PointerAlignment {
                         address_space: address_space,
                         type_bit_width: mem_size,
-                        abi_alignment: Some(abi_alignment),
-                        preferred_alignment: Some(pref_alignment),
+                        abi_alignment: abi_alignment,
+                        preferred_alignment: pref_alignment,
                         index_bit_width: index_size,
                     });
                 }
