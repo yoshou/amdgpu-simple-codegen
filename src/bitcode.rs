@@ -458,10 +458,17 @@ struct BitcodeModuleParser {
     attribute_groups: HashMap<u32, AttributeList>,
     attributes: Vec<AttributeList>,
     comdats: Vec<Comdat>,
-    values: Vec<Value>,
+    values: Vec<Rc<RefCell<Value>>>,
     global_inits: HashMap<usize, u64>,
     vst_offset: u64,
     function_demanding_body_index: Option<usize>,
+}
+
+impl BitcodeModuleParser {
+    fn push_value(&mut self, value: Value) {
+        let value = Rc::new(RefCell::new(value));
+        self.values.push(value);
+    }
 }
 
 use either::*;
@@ -820,6 +827,24 @@ impl num::FromPrimitive for ICmpPredicate {
             41 => Some(Self::SLE),
             _ => None,
         }
+    }
+}
+
+struct ValueRefList {
+    values: Vec<ValueRef>
+}
+
+impl ValueRefList {
+    fn get(&self, index: usize) -> Option<ValueRef> {
+        self.values.get(index).map(|x| x.clone())
+    }
+
+    fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    fn push(&mut self, value: ValueRef) {
+        self.values.push(value)
     }
 }
 
@@ -1396,7 +1421,7 @@ impl Bitcode {
                             unimplemented!();
                         }
                     }
-                    parser.values.push(value.unwrap());
+                    parser.push_value(value.unwrap());
                 }
                 BitcodeEntry::Block(_) => {
                     return Err(DecodeError {
@@ -1422,7 +1447,7 @@ impl Bitcode {
                 message: "Missing function".to_string(),
             })?;
 
-        if let Value::Function(value) = function {
+        if let Value::Function(value) = function.borrow().clone() {
             Ok(value.clone())
         } else {
             panic!();
@@ -1433,9 +1458,13 @@ impl Bitcode {
         parser: &mut BitcodeModuleParser,
         iter: &mut I,
     ) -> Result<(), DecodeError> {
+        let mut values = ValueRefList {
+            values: parser.values.iter().map(|x| Rc::downgrade(&x)).collect()
+        };
+
         let function = Bitcode::get_function_demanding_body(parser)?;
-        for arg in &function.borrow_mut().arguments {
-            parser.values.push(Value::Argument(arg.clone()));
+        for arg in &function.borrow_mut().argument_values {
+            values.push(Rc::downgrade(arg));
         }
 
         let mut lazy_assign = vec![];
@@ -1462,10 +1491,19 @@ impl Bitcode {
                                 });
                             };
 
-                            function
-                                .borrow_mut()
-                                .bbs
-                                .resize(size, Rc::new(RefCell::new(BasicBlock { insts: vec![] })));
+                            for _ in 0..size {
+                                let bb = Rc::new(RefCell::new(BasicBlock { insts: vec![], inst_values: vec![] }));
+
+                                function
+                                    .borrow_mut()
+                                    .bbs.push(Rc::downgrade(&bb));
+
+                                let value = Rc::new(RefCell::new(Value::BasicBlock(bb)));
+
+                                function
+                                    .borrow_mut()
+                                    .bb_values.push(value);
+                            }
                         }
                         2 => {
                             /* INST_BINOP */
@@ -1474,7 +1512,7 @@ impl Bitcode {
                                 match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
                                             value.clone()
                                         } else {
@@ -1497,7 +1535,7 @@ impl Bitcode {
                                 match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
                                             value.clone()
                                         } else {
@@ -1519,7 +1557,7 @@ impl Bitcode {
                             let opcode = if let Some(value) = iter.next() {
                                 match value {
                                     BitcodeValue::Value(value) => {
-                                        decode_binary_opcode(*value, lhs.ty()).unwrap().clone()
+                                        decode_binary_opcode(*value, lhs.upgrade().unwrap().borrow().ty()).unwrap().clone()
                                     }
                                     _ => {
                                         return Err(DecodeError {
@@ -1534,13 +1572,13 @@ impl Bitcode {
                             };
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            let inst = Rc::new(RefCell::new(Inst::BinOpInst(BinOpInst {
+                            let inst = Inst::BinOpInst(BinOpInst {
                                 opcode: opcode,
-                                lhs: lhs,
-                                rhs: rhs,
-                            })));
-                            bb.borrow_mut().insts.push(inst.clone());
-                            parser.values.push(Value::Instruction(inst));
+                                lhs,
+                                rhs,
+                            });
+                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            values.push(value);
                         }
                         3 => {
                             /* INST_CAST */
@@ -1549,7 +1587,7 @@ impl Bitcode {
                                 match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
                                             value.clone()
                                         } else {
@@ -1603,13 +1641,13 @@ impl Bitcode {
                             };
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            let inst = Rc::new(RefCell::new(Inst::CastInst(CastInst {
+                            let inst = Inst::CastInst(CastInst {
                                 value: operand,
                                 result_ty: ty,
                                 opcode: opcode,
-                            })));
-                            bb.borrow_mut().insts.push(inst.clone());
-                            parser.values.push(Value::Instruction(inst));
+                            });
+                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            values.push(value);
                         }
                         10 => {
                             /* INST_RET */
@@ -1617,15 +1655,15 @@ impl Bitcode {
                                 unimplemented!();
                             }
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            let inst = Rc::new(RefCell::new(Inst::ReturnInst(ReturnInst {
+                            let inst = Inst::ReturnInst(ReturnInst {
                                 return_value: None,
-                            })));
+                            });
 
-                            if inst.borrow().is_terminator() {
+                            if inst.is_terminator() {
                                 bb_idx += 1;
                             }
 
-                            bb.borrow_mut().insts.push(inst.clone());
+                            bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                         }
                         11 => {
                             /* INST_BR */
@@ -1636,7 +1674,7 @@ impl Bitcode {
                                         if let Some(value) =
                                             function.borrow().bbs.get(*value as usize)
                                         {
-                                            Rc::downgrade(value)
+                                            value.clone()
                                         } else {
                                             unimplemented!();
                                         }
@@ -1658,7 +1696,7 @@ impl Bitcode {
                                         if let Some(value) =
                                             function.borrow().bbs.get(*value as usize)
                                         {
-                                            Some(Rc::downgrade(value))
+                                            Some(value.clone())
                                         } else {
                                             unimplemented!();
                                         }
@@ -1676,7 +1714,7 @@ impl Bitcode {
                                 match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
                                             Some(value.clone())
                                         } else {
@@ -1694,16 +1732,16 @@ impl Bitcode {
                             };
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            let inst = Rc::new(RefCell::new(Inst::BranchInst(BranchInst {
+                            let inst = Inst::BranchInst(BranchInst {
                                 true_condition: true_cond,
                                 false_condition: false_cond.zip(cond),
-                            })));
+                            });
 
-                            if inst.borrow().is_terminator() {
+                            if inst.is_terminator() {
                                 bb_idx += 1;
                             }
 
-                            bb.borrow_mut().insts.push(inst.clone());
+                            bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                         }
                         16 => {
                             /* INST_PHI */
@@ -1724,19 +1762,19 @@ impl Bitcode {
                                 });
                             };
 
-                            let inst = Rc::new(RefCell::new(Inst::PhiInst(PhiInst {
+                            let inst = Inst::PhiInst(PhiInst {
                                 ty,
                                 incoming: vec![],
-                            })));
+                            });
 
-                            let reference_value_index = parser.values.len();
+                            let reference_value_index = values.len();
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            bb.borrow_mut().insts.push(inst.clone());
-                            parser.values.push(Value::Instruction(inst.clone()));
+                            let (value, inst) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst.clone());
+                            values.push(value);
 
                             let assign =
-                                move |parser: &mut BitcodeModuleParser| -> Result<(), DecodeError> {
+                                move |parser: &BitcodeModuleParser, values: &ValueRefList| -> Result<(), DecodeError> {
                                     let function = Bitcode::get_function_demanding_body(parser)?;
                                     let values_iter =
                                         flatten_record_values(record).skip(1).step_by(2);
@@ -1751,7 +1789,7 @@ impl Bitcode {
                                                     } else {
                                                         -((*value >> 1) as i64)
                                                     };
-                                                    if let Some(value) = parser.values.get(
+                                                    if let Some(value) = values.get(
                                                         (reference_value_index as i64 - value)
                                                             as usize,
                                                     ) {
@@ -1771,7 +1809,7 @@ impl Bitcode {
                                                     if let Some(value) =
                                                         function.borrow().bbs.get(*value as usize)
                                                     {
-                                                        Rc::downgrade(value)
+                                                        value.clone()
                                                     } else {
                                                         unimplemented!();
                                                     }
@@ -1786,7 +1824,7 @@ impl Bitcode {
                                         })
                                         .collect::<Result<Vec<_>, _>>()?;
 
-                                    if let Inst::PhiInst(inst) = &mut *inst.borrow_mut() {
+                                    if let Inst::PhiInst(inst) = &mut *inst.upgrade().unwrap().borrow_mut() {
                                         inst.incoming = values;
                                     }
 
@@ -1805,9 +1843,9 @@ impl Bitcode {
                                 match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
-                                            (value.clone(), value.ty())
+                                            (value.clone(), value.upgrade().unwrap().borrow().ty())
                                         } else {
                                             unimplemented!();
                                         }
@@ -1890,15 +1928,15 @@ impl Bitcode {
                             };
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            let inst = Rc::new(RefCell::new(Inst::LoadInst(LoadInst {
+                            let inst = Inst::LoadInst(LoadInst {
                                 ty: ty,
                                 ptr: operand,
                                 name: "".to_string(),
                                 is_volatile: volatile,
                                 alignment: alignment as u32,
-                            })));
-                            bb.borrow_mut().insts.push(inst.clone());
-                            parser.values.push(Value::Instruction(inst));
+                            });
+                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            values.push(value);
                         }
                         28 => {
                             /* INST_CMP */
@@ -1907,7 +1945,7 @@ impl Bitcode {
                                 match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
                                             value.clone()
                                         } else {
@@ -1930,7 +1968,7 @@ impl Bitcode {
                                 match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
                                             value.clone()
                                         } else {
@@ -1949,7 +1987,7 @@ impl Bitcode {
                                 });
                             };
 
-                            let inst = if lhs.ty().is_floating_point() {
+                            let inst = if lhs.upgrade().unwrap().borrow().ty().is_floating_point() {
                                 let predicate = if let Some(value) = iter.next() {
                                     match value {
                                         BitcodeValue::Value(value) => {
@@ -1966,11 +2004,11 @@ impl Bitcode {
                                         message: "Missing predicate".to_string(),
                                     });
                                 };
-                                Rc::new(RefCell::new(Inst::FCmpInst(FCmpInst {
+                                Inst::FCmpInst(FCmpInst {
                                     predicate,
                                     lhs,
                                     rhs,
-                                })))
+                                })
                             } else {
                                 let predicate = if let Some(value) = iter.next() {
                                     match value {
@@ -1988,16 +2026,16 @@ impl Bitcode {
                                         message: "Missing predicate".to_string(),
                                     });
                                 };
-                                Rc::new(RefCell::new(Inst::ICmpInst(ICmpInst {
+                                Inst::ICmpInst(ICmpInst {
                                     predicate,
                                     lhs,
                                     rhs,
-                                })))
+                                })
                             };
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            bb.borrow_mut().insts.push(inst.clone());
-                            parser.values.push(Value::Instruction(inst));
+                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            values.push(value);
                         }
                         34 => {
                             /* CALL */
@@ -2107,9 +2145,8 @@ impl Bitcode {
 
                             let callee = if let Some(value) = iter.next() {
                                 match value {
-                                    BitcodeValue::Value(value) => parser
-                                        .values
-                                        .get(parser.values.len() - *value as usize)
+                                    BitcodeValue::Value(value) => values
+                                        .get(values.len() - *value as usize)
                                         .unwrap()
                                         .clone(),
                                     _ => {
@@ -2141,10 +2178,7 @@ impl Bitcode {
                                         if let Some(value) = iter.next() {
                                             match value {
                                                 BitcodeValue::Value(value) => {
-                                                    Ok(Value::BasicBlock(
-                                                        function.borrow_mut().bbs[*value as usize]
-                                                            .clone(),
-                                                    ))
+                                                    Ok(Rc::downgrade(&function.borrow_mut().bb_values[*value as usize]))
                                                 }
                                                 _ => Err(DecodeError {
                                                     message: "Invalid value".to_string(),
@@ -2174,15 +2208,15 @@ impl Bitcode {
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
 
-                            let inst = Rc::new(RefCell::new(Inst::CallInst(CallInst {
+                            let inst = Inst::CallInst(CallInst {
                                 function_type: Type::FunctionType(function_type),
                                 callee: callee,
                                 args: args,
                                 attributes: attributes.clone(),
-                            })));
+                            });
 
-                            bb.borrow_mut().insts.push(inst.clone());
-                            parser.values.push(Value::Instruction(inst));
+                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            values.push(value);
                         }
                         43 => {
                             /* INST_GEP */
@@ -2223,7 +2257,7 @@ impl Bitcode {
                                 match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
                                             value.clone()
                                         } else {
@@ -2246,7 +2280,7 @@ impl Bitcode {
                                 .map(|value| match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
                                             Ok(value.clone())
                                         } else {
@@ -2261,14 +2295,14 @@ impl Bitcode {
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
                             let inst =
-                                Rc::new(RefCell::new(Inst::GetElementPtrInst(GetElementPtrInst {
+                                Inst::GetElementPtrInst(GetElementPtrInst {
                                     ty: ty,
                                     base_ptr: base_ptr,
                                     indexes: indexes,
                                     inbounds: inbounds,
-                                })));
-                            bb.borrow_mut().insts.push(inst.clone());
-                            parser.values.push(Value::Instruction(inst));
+                                });
+                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            values.push(value);
                         }
                         44 => {
                             /* INST_STORE */
@@ -2277,7 +2311,7 @@ impl Bitcode {
                                 match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
                                             value.clone()
                                         } else {
@@ -2300,7 +2334,7 @@ impl Bitcode {
                                 match value {
                                     BitcodeValue::Value(value) => {
                                         if let Some(value) =
-                                            parser.values.get(parser.values.len() - *value as usize)
+                                            values.get(values.len() - *value as usize)
                                         {
                                             value.clone()
                                         } else {
@@ -2350,15 +2384,15 @@ impl Bitcode {
                             };
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            let inst = Rc::new(RefCell::new(Inst::StoreInst(StoreInst {
+                            let inst = Inst::StoreInst(StoreInst {
                                 ptr,
-                                val: value,
+                                value,
                                 name: "".to_string(),
                                 is_volatile: volatile,
                                 alignment: alignment as u32,
-                            })));
-                            bb.borrow_mut().insts.push(inst.clone());
-                            parser.values.push(Value::Instruction(inst));
+                            });
+                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            values.push(value);
                         }
                         _ => {
                             unimplemented!();
@@ -2398,7 +2432,7 @@ impl Bitcode {
         }
 
         for assign in lazy_assign {
-            assign(parser)?;
+            assign(parser, &values)?;
         }
 
         Ok(())
@@ -2681,9 +2715,7 @@ impl Bitcode {
             comdat: comdat.map(|x| x.clone()),
         };
 
-        parser
-            .values
-            .push(Value::GlobalVariable(Rc::new(RefCell::new(global_var))));
+        parser.push_value(Value::GlobalVariable(Rc::new(RefCell::new(global_var))));
 
         if let Some(init_id) = init_id {
             parser.global_inits.insert(parser.values.len() - 1, init_id);
@@ -2946,7 +2978,7 @@ impl Bitcode {
                     position: i,
                 }))
             })
-            .collect();
+            .collect::<Vec<Rc<RefCell<Argument>>>>();
 
         let func = Function {
             ty: ty,
@@ -2961,12 +2993,12 @@ impl Bitcode {
             dll_storage_class: dll_storage_class,
             comdat: comdat,
             bbs: vec![],
-            arguments: args,
+            bb_values: vec![],
+            arguments: args.iter().map(|x| Rc::downgrade(x)).collect(),
+            argument_values: args.iter().map(|x| Rc::new(RefCell::new(Value::Argument(x.clone())))).collect(),
         };
 
-        parser
-            .values
-            .push(Value::Function(Rc::new(RefCell::new(func))));
+        parser.push_value(Value::Function(Rc::new(RefCell::new(func))));
 
         if !is_proto {
             parser.function_demanding_body_index = Some(parser.values.len() - 1);
