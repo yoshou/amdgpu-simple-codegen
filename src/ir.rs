@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 pub struct Module {
     pub data_layout: DataLayout,
-    pub values: Vec<Value>,
+    pub values: Vec<Rc<RefCell<Value>>>,
 }
 
 impl Module {
@@ -10,7 +10,7 @@ impl Module {
         &mut self,
         id: &str,
         types: &Vec<Type>,
-    ) -> Option<Rc<RefCell<Function>>> {
+    ) -> Option<ValueRef> {
         match id {
             "amdgcn_kernarg_segment_ptr" => {
                 let ty = FunctionType {
@@ -30,7 +30,9 @@ impl Module {
                     linkage: LinkageTypes::External,
                     name: "llvm.amdgcn.kernarg.segment.ptr".to_string(),
                     arguments: vec![],
+                    argument_values: vec![],
                     bbs: vec![],
+                    bb_values: vec![],
                     alignment: None,
                     calling_conv: 0,
                     attributes: AttributeList { attributes: vec![] },
@@ -39,8 +41,9 @@ impl Module {
                     dll_storage_class: DLLStorageClassTypes::Default,
                     comdat: None,
                 }));
-                self.values.push(Value::Function(func.clone()));
-                Some(func)
+                let value = Rc::new(RefCell::new(Value::Function(func)));
+                self.values.push(value.clone());
+                Some(Rc::downgrade(&value))
             }
             _ => None,
         }
@@ -339,6 +342,12 @@ impl Type {
             _ => false,
         }
     }
+    pub fn is_aggregate(&self) -> bool {
+        match self {
+            Self::StructType(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Eq, Hash, PartialEq, Clone, Debug)]
@@ -555,7 +564,103 @@ pub enum Constant {}
 
 #[derive(Clone, Debug)]
 pub struct BasicBlock {
-    pub insts: Vec<Rc<RefCell<Inst>>>,
+    pub insts: Vec<Weak<RefCell<Inst>>>,
+    pub inst_values: Vec<Rc<RefCell<Value>>>,
+}
+
+impl BasicBlock {
+    pub fn insert_instruction(&mut self, index: usize, inst: Inst) -> (ValueRef, Weak<RefCell<Inst>>) {
+        let inst = Rc::new(RefCell::new(inst));
+        let inst_ref = Rc::downgrade(&inst);
+        self.insts.insert(index, Rc::downgrade(&inst));
+        let value = Rc::new(RefCell::new(Value::Instruction(inst)));
+        let value_ref = Rc::downgrade(&value);
+        self.inst_values.insert(index, value);
+        (value_ref, inst_ref)
+    }
+    
+    pub fn push_instruction(&mut self, inst: Inst) -> (ValueRef, Weak<RefCell<Inst>>) {
+        self.insert_instruction(self.insts.len(), inst)
+    }
+
+    pub fn position(&self, value: &ValueRef) -> Option<usize> {
+        self.inst_values.iter().position(|x| x.as_ptr() == value.upgrade().unwrap().as_ptr())
+    }
+
+    pub fn create_call(
+        &mut self,
+        position: Option<&ValueRef>,
+        func: ValueRef,
+        args: Vec<ValueRef>,
+        name: String,
+    ) -> Option<ValueRef> {
+        let function_type = func.upgrade().unwrap().borrow().ty().clone();
+
+        let position = if let Some(position) = position {
+            self.position(position)?
+        } else {
+            0
+        };
+
+        let (value, _) = self.insert_instruction(position, Inst::CallInst(CallInst {
+            args,
+            function_type,
+            callee: func,
+            attributes: AttributeList { attributes: vec![] },
+        }));
+
+        Some(value)
+    }
+
+    pub fn create_get_element_ptr_inbounds_index1(
+        &mut self,
+        position: Option<&ValueRef>,
+        ty: Type,
+        ptr: ValueRef,
+        index: ValueRef,
+        name: String,
+    ) -> Option<ValueRef> {
+        let position = if let Some(position) = position {
+            self.position(position)?
+        } else {
+            0
+        };
+
+        let (value, _) = self.insert_instruction(position, Inst::GetElementPtrInst(GetElementPtrInst {
+            inbounds: true,
+            base_ptr: ptr,
+            ty: ty,
+            indexes: vec![index],
+        }));
+
+        Some(value)
+    }
+
+    pub fn create_aligned_load(
+        &mut self,
+        position: Option<&ValueRef>,
+        ty: Type,
+        ptr: ValueRef,
+        alignment: u32,
+        is_volatile: bool,
+        name: String,
+    ) -> Option<ValueRef> {
+        let position = if let Some(position) = position {
+            self.position(position)?
+        } else {
+            0
+        };
+
+        let (value, _) = self.insert_instruction(position, Inst::LoadInst(LoadInst {
+            ptr,
+            ty,
+            alignment,
+            is_volatile,
+            name,
+        }));
+
+        Some(value)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -578,8 +683,10 @@ pub struct Function {
     pub unnamed_address: UnnamedAddr,
     pub dll_storage_class: DLLStorageClassTypes,
     pub comdat: Option<Comdat>,
-    pub bbs: Vec<Rc<RefCell<BasicBlock>>>,
-    pub arguments: Vec<Rc<RefCell<Argument>>>,
+    pub bbs: Vec<BasicBlockRef>,
+    pub bb_values: Vec<Rc<RefCell<Value>>>,
+    pub arguments: Vec<Weak<RefCell<Argument>>>,
+    pub argument_values: Vec<Rc<RefCell<Value>>>,
 }
 
 use num_bigint::BigUint;
@@ -617,8 +724,8 @@ impl Value {
                     Type::FunctionType(ty) => *ty.result.clone(),
                     _ => unimplemented!(),
                 },
-                Inst::GetElementPtrInst(inst) => inst.base_ptr.ty(),
-                Inst::BinOpInst(inst) => inst.lhs.ty(),
+                Inst::GetElementPtrInst(inst) => inst.base_ptr.upgrade().unwrap().borrow().ty(),
+                Inst::BinOpInst(inst) => inst.lhs.upgrade().unwrap().borrow().ty(),
                 Inst::LoadInst(inst) => inst.ty.clone(),
                 Inst::FCmpInst(_) => Type::IntegerType(IntegerType { num_bits: 1 }),
                 Inst::ICmpInst(_) => Type::IntegerType(IntegerType { num_bits: 1 }),
@@ -630,10 +737,35 @@ impl Value {
             Self::GlobalVariable(value) => value.borrow().ty.clone(),
             Self::ConstantInt(value) => value.borrow().ty.clone(),
             Self::Argument(value) => value.borrow().ty.clone(),
+            Self::Function(value) => (*value.borrow().ty.result).clone(),
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn name(&self) -> String {
+        match self {
+            Self::Instruction(value) => match &*value.borrow() {
+                Inst::CallInst(inst) => todo!(),
+                Inst::GetElementPtrInst(inst) => todo!(),
+                Inst::BinOpInst(inst) => todo!(),
+                Inst::LoadInst(inst) => inst.name.clone(),
+                Inst::FCmpInst(_) => todo!(),
+                Inst::ICmpInst(_) => todo!(),
+                Inst::CastInst(inst) => todo!(),
+                Inst::BranchInst(_) => todo!(),
+                Inst::PhiInst(inst) => todo!(),
+                _ => unimplemented!(),
+            },
+            Self::GlobalVariable(value) => value.borrow().name.clone(),
+            Self::ConstantInt(value) => todo!(),
+            Self::Argument(value) => value.borrow().name.clone(),
             _ => unimplemented!(),
         }
     }
 }
+
+pub type BasicBlockRef = Weak<RefCell<BasicBlock>>;
+pub type ValueRef = Weak<RefCell<Value>>;
 
 impl Inst {
     pub fn is_terminator(&self) -> bool {
@@ -670,8 +802,8 @@ pub enum BinaryOpcode {
 #[derive(Clone, Debug)]
 pub struct BinOpInst {
     pub opcode: BinaryOpcode,
-    pub lhs: Value,
-    pub rhs: Value,
+    pub lhs: ValueRef,
+    pub rhs: ValueRef,
 }
 
 #[derive(Clone, Debug)]
@@ -711,21 +843,21 @@ pub enum FCmpPredicate {
 #[derive(Clone, Debug)]
 pub struct ICmpInst {
     pub predicate: ICmpPredicate,
-    pub lhs: Value,
-    pub rhs: Value,
+    pub lhs: ValueRef,
+    pub rhs: ValueRef,
 }
 
 #[derive(Clone, Debug)]
 pub struct FCmpInst {
     pub predicate: FCmpPredicate,
-    pub lhs: Value,
-    pub rhs: Value,
+    pub lhs: ValueRef,
+    pub rhs: ValueRef,
 }
 
 #[derive(Clone, Debug)]
 pub struct LoadInst {
     pub ty: Type,
-    pub ptr: Value,
+    pub ptr: ValueRef,
     pub name: String,
     pub is_volatile: bool,
     pub alignment: u32,
@@ -733,8 +865,8 @@ pub struct LoadInst {
 
 #[derive(Clone, Debug)]
 pub struct StoreInst {
-    pub ptr: Value,
-    pub val: Value,
+    pub ptr: ValueRef,
+    pub value: ValueRef,
     pub name: String,
     pub is_volatile: bool,
     pub alignment: u32,
@@ -742,19 +874,19 @@ pub struct StoreInst {
 
 #[derive(Clone, Debug)]
 pub struct BranchInst {
-    pub true_condition: Weak<RefCell<BasicBlock>>,
-    pub false_condition: Option<(Weak<RefCell<BasicBlock>>, Value)>,
+    pub true_condition: BasicBlockRef,
+    pub false_condition: Option<(BasicBlockRef, ValueRef)>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ReturnInst {
-    pub return_value: Option<Value>,
+    pub return_value: Option<ValueRef>,
 }
 
 #[derive(Clone, Debug)]
 pub struct PhiInst {
     pub ty: Type,
-    pub incoming: Vec<(Weak<RefCell<BasicBlock>>, Value)>,
+    pub incoming: Vec<(BasicBlockRef, ValueRef)>,
 }
 
 #[derive(Clone, Debug)]
@@ -776,7 +908,7 @@ pub enum CastOpcode {
 
 #[derive(Clone, Debug)]
 pub struct CastInst {
-    pub value: Value,
+    pub value: ValueRef,
     pub opcode: CastOpcode,
     pub result_ty: Type,
 }
@@ -784,16 +916,16 @@ pub struct CastInst {
 #[derive(Clone, Debug)]
 pub struct CallInst {
     pub function_type: Type,
-    pub callee: Value,
-    pub args: Vec<Value>,
+    pub callee: ValueRef,
+    pub args: Vec<ValueRef>,
     pub attributes: AttributeList,
 }
 
 #[derive(Clone, Debug)]
 pub struct GetElementPtrInst {
     pub ty: Type,
-    pub base_ptr: Value,
-    pub indexes: Vec<Value>,
+    pub base_ptr: ValueRef,
+    pub indexes: Vec<ValueRef>,
     pub inbounds: bool,
 }
 
