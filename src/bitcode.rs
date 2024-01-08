@@ -831,7 +831,7 @@ impl num::FromPrimitive for ICmpPredicate {
 }
 
 struct ValueRefList {
-    values: Vec<ValueRef>
+    values: Vec<ValueRef>,
 }
 
 impl ValueRefList {
@@ -1461,7 +1461,7 @@ impl Bitcode {
         iter: &mut I,
     ) -> Result<(), DecodeError> {
         let mut values = ValueRefList {
-            values: parser.values.iter().map(|x| Rc::downgrade(&x)).collect()
+            values: parser.values.iter().map(|x| Rc::downgrade(&x)).collect(),
         };
 
         let function = Bitcode::get_function_demanding_body(parser)?;
@@ -1494,17 +1494,16 @@ impl Bitcode {
                             };
 
                             for _ in 0..size {
-                                let bb = Rc::new(RefCell::new(BasicBlock { insts: vec![], inst_values: vec![] }));
+                                let bb = Rc::new(RefCell::new(BasicBlock {
+                                    insts: vec![],
+                                    inst_values: vec![],
+                                }));
 
-                                function
-                                    .borrow_mut()
-                                    .bbs.push(Rc::downgrade(&bb));
+                                function.borrow_mut().bbs.push(Rc::downgrade(&bb));
 
                                 let value = Rc::new(RefCell::new(Value::BasicBlock(bb)));
 
-                                function
-                                    .borrow_mut()
-                                    .bb_values.push(value);
+                                function.borrow_mut().bb_values.push(value);
                             }
                         }
                         2 => {
@@ -1558,9 +1557,12 @@ impl Bitcode {
 
                             let opcode = if let Some(value) = iter.next() {
                                 match value {
-                                    BitcodeValue::Value(value) => {
-                                        decode_binary_opcode(*value, lhs.upgrade().unwrap().borrow().ty()).unwrap().clone()
-                                    }
+                                    BitcodeValue::Value(value) => decode_binary_opcode(
+                                        *value,
+                                        lhs.upgrade().unwrap().borrow().ty(),
+                                    )
+                                    .unwrap()
+                                    .clone(),
                                     _ => {
                                         return Err(DecodeError {
                                             message: "Invalid opcode value".to_string(),
@@ -1580,7 +1582,8 @@ impl Bitcode {
                                 rhs,
                                 name: ValueName::None,
                             });
-                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            let (value, _) =
+                                bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
                         }
                         3 => {
@@ -1650,7 +1653,8 @@ impl Bitcode {
                                 opcode,
                                 name: ValueName::None,
                             });
-                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            let (value, _) =
+                                bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
                         }
                         10 => {
@@ -1777,11 +1781,17 @@ impl Bitcode {
                             let reference_value_index = values.len();
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            let (value, inst) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst.clone());
+                            let (value, inst) = bb
+                                .upgrade()
+                                .unwrap()
+                                .borrow_mut()
+                                .push_instruction(inst.clone());
                             values.push(value);
 
                             let assign =
-                                move |parser: &BitcodeModuleParser, values: &ValueRefList| -> Result<(), DecodeError> {
+                                move |parser: &BitcodeModuleParser,
+                                      values: &ValueRefList|
+                                      -> Result<(), DecodeError> {
                                     let function = Bitcode::get_function_demanding_body(parser)?;
                                     let values_iter =
                                         flatten_record_values(record).skip(1).step_by(2);
@@ -1831,7 +1841,9 @@ impl Bitcode {
                                         })
                                         .collect::<Result<Vec<_>, _>>()?;
 
-                                    if let Inst::PhiInst(inst) = &mut *inst.upgrade().unwrap().borrow_mut() {
+                                    if let Inst::PhiInst(inst) =
+                                        &mut *inst.upgrade().unwrap().borrow_mut()
+                                    {
                                         inst.incoming = values;
                                     }
 
@@ -1942,7 +1954,8 @@ impl Bitcode {
                                 alignment: alignment as u32,
                                 name: ValueName::None,
                             });
-                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            let (value, _) =
+                                bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
                         }
                         28 => {
@@ -2043,7 +2056,8 @@ impl Bitcode {
                             };
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            let (value, _) =
+                                bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
                         }
                         34 => {
@@ -2154,10 +2168,9 @@ impl Bitcode {
 
                             let callee = if let Some(value) = iter.next() {
                                 match value {
-                                    BitcodeValue::Value(value) => values
-                                        .get(values.len() - *value as usize)
-                                        .unwrap()
-                                        .clone(),
+                                    BitcodeValue::Value(value) => {
+                                        values.get(values.len() - *value as usize).unwrap().clone()
+                                    }
                                     _ => {
                                         return Err(DecodeError {
                                             message: "Invalid callee value".to_string(),
@@ -2186,9 +2199,10 @@ impl Bitcode {
                                     Type::LabelType => {
                                         if let Some(value) = iter.next() {
                                             match value {
-                                                BitcodeValue::Value(value) => {
-                                                    Ok(Rc::downgrade(&function.borrow_mut().bb_values[*value as usize]))
-                                                }
+                                                BitcodeValue::Value(value) => Ok(Rc::downgrade(
+                                                    &function.borrow_mut().bb_values
+                                                        [*value as usize],
+                                                )),
                                                 _ => Err(DecodeError {
                                                     message: "Invalid value".to_string(),
                                                 }),
@@ -2225,7 +2239,8 @@ impl Bitcode {
                                 name: ValueName::None,
                             });
 
-                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            let (value, _) =
+                                bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
                         }
                         43 => {
@@ -2304,15 +2319,15 @@ impl Bitcode {
                                 .collect::<Result<Vec<_>, _>>()?;
 
                             let bb = &function.borrow_mut().bbs[bb_idx];
-                            let inst =
-                                Inst::GetElementPtrInst(GetElementPtrInst {
-                                    ty: ty,
-                                    base_ptr: base_ptr,
-                                    indexes: indexes,
-                                    inbounds: inbounds,
-                                    name: ValueName::None,
-                                });
-                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            let inst = Inst::GetElementPtrInst(GetElementPtrInst {
+                                ty: ty,
+                                base_ptr: base_ptr,
+                                indexes: indexes,
+                                inbounds: inbounds,
+                                name: ValueName::None,
+                            });
+                            let (value, _) =
+                                bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
                         }
                         44 => {
@@ -2402,7 +2417,8 @@ impl Bitcode {
                                 alignment: alignment as u32,
                                 name: ValueName::None,
                             });
-                            let (value, _) = bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
+                            let (value, _) =
+                                bb.upgrade().unwrap().borrow_mut().push_instruction(inst);
                             values.push(value);
                         }
                         _ => {
@@ -3006,7 +3022,10 @@ impl Bitcode {
             bbs: vec![],
             bb_values: vec![],
             arguments: args.iter().map(|x| Rc::downgrade(x)).collect(),
-            argument_values: args.iter().map(|x| Rc::new(RefCell::new(Value::Argument(x.clone())))).collect(),
+            argument_values: args
+                .iter()
+                .map(|x| Rc::new(RefCell::new(Value::Argument(x.clone()))))
+                .collect(),
         };
 
         parser.push_value(Value::Function(Rc::new(RefCell::new(func))));
