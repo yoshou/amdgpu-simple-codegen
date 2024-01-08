@@ -4,6 +4,9 @@ use std::io::Read;
 use std::path;
 
 use amdgpu_simple_codegen::bitcode::*;
+use amdgpu_simple_codegen::ir::*;
+use amdgpu_simple_codegen::passes::amdgpu::lower_kernel_arguments::LowerKernelArguments;
+use amdgpu_simple_codegen::pass::*;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -26,8 +29,19 @@ fn main() {
     }
 
     let bitcode = Bitcode::new(&data);
-    let module = match bitcode.decode() {
+    let mut module = match bitcode.decode() {
         Ok(value) => value,
         Err(err) => panic!("Decode bitcode error: {}", err.message),
     };
+
+    let mut pass = Box::new(LowerKernelArguments {});
+
+    for value in module.values.clone() {
+        match &*value.borrow() {
+            Value::Function(function) => {
+                pass.run_on_function(function.clone(), &mut module);
+            },
+            _ => {}
+        }
+    }
 }
