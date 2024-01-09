@@ -77,11 +77,33 @@ impl ControlFlowGraph {
         self.nodes[0].clone()
     }
 
+    pub fn get_exit_nodes(&self) -> Vec<&BasicBlockRefNode> {
+        self.succs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, nodes)| {
+                if nodes.len() == 0 {
+                    Some(&self.nodes[i])
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     pub fn get_successor_nodes(&self, node: &BasicBlockRefNode) -> Vec<&BasicBlockRefNode> {
         let index = self.nodes.iter().position(|x| x == node).unwrap();
         self.succs[index]
             .iter()
             .map(|succ| &self.nodes[*succ])
+            .collect()
+    }
+
+    pub fn get_predecessor_nodes(&self, node: &BasicBlockRefNode) -> Vec<&BasicBlockRefNode> {
+        let index = self.nodes.iter().position(|x| x == node).unwrap();
+        self.preds[index]
+            .iter()
+            .map(|pred| &self.nodes[*pred])
             .collect()
     }
 
@@ -103,19 +125,53 @@ impl ControlFlowGraph {
         }
     }
 
-    pub fn find_unreachable_nodes(
+    pub fn dfs_pred_nodes(
+        &self,
+        node: &BasicBlockRefNode,
+        action: &impl Fn(&BasicBlockRefNode) -> (),
+        visited: &mut HashSet<BasicBlockRefNode>,
+    ) {
+        if visited.contains(node) {
+            return;
+        }
+        action(node);
+        visited.insert(node.clone());
+
+        let index = self.nodes.iter().position(|x| x == node).unwrap();
+        for pred in &self.preds[index] {
+            self.dfs_pred_nodes(&self.nodes[*pred], action, visited);
+        }
+    }
+
+    pub fn dfs_nodes(
+        &self,
+        node: &BasicBlockRefNode,
+        action: &impl Fn(&BasicBlockRefNode) -> (),
+        visited: &mut HashSet<BasicBlockRefNode>,
+    ) {
+        if visited.contains(node) {
+            return;
+        }
+        action(node);
+        visited.insert(node.clone());
+
+        let index = self.nodes.iter().position(|x| x == node).unwrap();
+        for succ in &self.succs[index] {
+            self.dfs_nodes(&self.nodes[*succ], action, visited);
+        }
+        for pred in &self.preds[index] {
+            self.dfs_nodes(&self.nodes[*pred], action, visited);
+        }
+    }
+
+    pub fn find_reachable_nodes(
         &self,
         s: &BasicBlockRefNode,
         excludes: HashSet<BasicBlockRefNode>,
     ) -> Vec<BasicBlockRefNode> {
         let mut visited = excludes.clone();
-        self.dfs_succ_nodes(s, &|_| {}, &mut visited);
-
-        let all_nodes = HashSet::from_iter(self.nodes.iter().map(|x| x.clone()));
-        all_nodes
-            .difference(&visited)
-            .map(|x| x.clone())
-            .collect::<Vec<_>>()
+        self.dfs_nodes(s, &|_| {}, &mut visited);
+        visited.iter().map(|x| x.clone()).collect()
     }
 }
 
@@ -138,7 +194,18 @@ impl DominatorTree {
         for (i, node) in tree.nodes.iter().enumerate() {
             let mut excludes = HashSet::new();
             excludes.insert(node.clone());
-            let unrechable_nodes = graph.find_unreachable_nodes(&graph.get_entry_node(), excludes);
+
+            let rechable_nodes: HashSet<BasicBlockRefNode> = HashSet::from_iter(
+                graph
+                    .find_reachable_nodes(&graph.get_entry_node(), excludes)
+                    .iter()
+                    .map(|x| x.clone()),
+            );
+            let all_nodes = HashSet::from_iter(graph.nodes.iter().map(|x| x.clone()));
+            let unrechable_nodes = all_nodes
+                .difference(&rechable_nodes)
+                .map(|x| x.clone())
+                .collect::<Vec<_>>();
 
             for unreachable_node in unrechable_nodes {
                 let j = graph
@@ -158,6 +225,60 @@ impl DominatorTree {
                     tree.parent[j] = Some(i);
                 }
             }
+        }
+        tree
+    }
+
+    pub fn from_cfg_post(graph: &ControlFlowGraph) -> DominatorTree {
+        let mut tree = DominatorTree {
+            nodes: graph.nodes.clone(),
+            parent: (0..graph.nodes.len() + 1).map(|_| None).collect(),
+            children: (0..graph.nodes.len() + 1).map(|_| Vec::new()).collect(),
+        };
+        let mut postdominators = (0..graph.nodes.len())
+            .map(|_| Vec::new())
+            .collect::<Vec<Vec<usize>>>();
+        for (i, node) in tree.nodes.iter().enumerate() {
+            let mut excludes = HashSet::new();
+            excludes.insert(node.clone());
+
+            let mut rechable_nodes = HashSet::new();
+            for exit_node in graph.get_exit_nodes() {
+                rechable_nodes.extend(graph.find_reachable_nodes(exit_node, excludes.clone()));
+            }
+
+            let all_nodes = HashSet::from_iter(graph.nodes.iter().map(|x| x.clone()));
+            let unrechable_nodes = all_nodes
+                .difference(&rechable_nodes)
+                .map(|x| x.clone())
+                .collect::<Vec<_>>();
+
+            for unreachable_node in unrechable_nodes {
+                let j = graph
+                    .nodes
+                    .iter()
+                    .position(|x| Weak::ptr_eq(&x.data, &unreachable_node.data))
+                    .unwrap();
+                postdominators[j].push(i);
+            }
+        }
+        for (i, node) in tree.nodes.iter().enumerate() {
+            let predecessors = graph.get_predecessor_nodes(node);
+            for predecessor in predecessors {
+                let j = graph.nodes.iter().position(|x| x == predecessor).unwrap();
+                if postdominators[j].contains(&i) {
+                    tree.children[i].push(j);
+                    tree.parent[j] = Some(i);
+                }
+            }
+        }
+
+        let virtual_exit_node = tree.children.len() - 1;
+        for node in graph.get_exit_nodes() {
+            let i = graph.nodes.iter().position(|x| x == node).unwrap();
+
+            tree.children[virtual_exit_node].push(i);
+            tree.parent[i] = Some(virtual_exit_node);
         }
         tree
     }
