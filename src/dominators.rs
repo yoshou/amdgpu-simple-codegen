@@ -7,7 +7,7 @@ use std::{
 
 #[derive(Clone, Debug)]
 pub struct BasicBlockRefNode {
-    data: BasicBlockRef,
+    pub data: BasicBlockRef,
 }
 
 impl PartialEq for BasicBlockRefNode {
@@ -182,6 +182,28 @@ pub struct DominatorTree {
 }
 
 impl DominatorTree {
+    pub fn get_nodes(&self) -> &Vec<BasicBlockRefNode> {
+        &self.nodes
+    }
+
+    pub fn get_post_node(&self, node: &BasicBlockRefNode) -> Option<&BasicBlockRefNode> {
+        let index = self
+            .nodes
+            .iter()
+            .position(|x| x == node)
+            .unwrap();
+        self.nodes.get(self.parent[index]?)
+    }
+
+    pub fn get_children(&self, node: &BasicBlockRefNode) -> Vec<&BasicBlockRefNode> {
+        let index = self
+            .nodes
+            .iter()
+            .position(|x| x == node)
+            .unwrap();
+        self.children[index].iter().map(|child| &self.nodes[*child]).collect()
+    }
+
     pub fn from_cfg(graph: &ControlFlowGraph) -> DominatorTree {
         let mut tree = DominatorTree {
             nodes: graph.nodes.clone(),
