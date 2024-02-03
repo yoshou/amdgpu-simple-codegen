@@ -27,6 +27,7 @@ impl Hash for BasicBlockRefNode {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct ControlFlowGraph {
     nodes: Vec<BasicBlockRefNode>,
     preds: Vec<Vec<usize>>,
@@ -175,6 +176,7 @@ impl ControlFlowGraph {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct DominatorTree {
     nodes: Vec<BasicBlockRefNode>,
     parent: Vec<Option<usize>>,
