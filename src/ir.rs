@@ -1010,7 +1010,7 @@ impl Value {
                 Inst::ICmpInst(_) => Type::IntegerType(IntegerType { num_bits: 1 }),
                 Inst::CastInst(inst) => inst.result_ty.clone(),
                 Inst::BranchInst(_) => Type::VoidType,
-                Inst::PhiInst(inst) => inst.ty.clone(),
+                Inst::PhiNode(inst) => inst.ty.clone(),
                 _ => unimplemented!(),
             },
             Self::GlobalVariable(value) => value.borrow().ty.clone(),
@@ -1032,7 +1032,7 @@ impl Value {
                 Inst::ICmpInst(inst) => inst.name.clone(),
                 Inst::CastInst(inst) => inst.name.clone(),
                 Inst::BranchInst(inst) => inst.name.clone(),
-                Inst::PhiInst(inst) => inst.name.clone(),
+                Inst::PhiNode(inst) => inst.name.clone(),
                 _ => unimplemented!(),
             },
             Self::GlobalVariable(value) => value.borrow().name.clone(),
@@ -1179,7 +1179,7 @@ pub struct ReturnInst {
 }
 
 #[derive(Clone, Debug)]
-pub struct PhiInst {
+pub struct PhiNode {
     pub ty: Type,
     pub incoming: Vec<(BasicBlockRef, ValueRef)>,
     pub name: ValueName,
@@ -1256,7 +1256,7 @@ pub enum Inst {
     FCmpInst(FCmpInst),
     BranchInst(BranchInst),
     ReturnInst(ReturnInst),
-    PhiInst(PhiInst),
+    PhiNode(PhiNode),
     LoadInst(LoadInst),
     StoreInst(StoreInst),
     CastInst(CastInst),

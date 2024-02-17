@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::{Rc, Weak}, collections::HashSet};
 
 use num_bigint::ToBigUint;
 
-use crate::{pass::FunctionPass, ir::{Function, Module, BasicBlockRef, Inst, BranchInst, ValueRef, IntegerType, Type, ValueName, ExtractValueInst, get_index_type, PhiInst, Value, ConstantInt}, dominators::{BasicBlockRefNode, ControlFlowGraph, DominatorTree}};
+use crate::{pass::FunctionPass, ir::{Function, Module, BasicBlockRef, Inst, BranchInst, ValueRef, IntegerType, Type, ValueName, ExtractValueInst, get_index_type, PhiNode, Value, ConstantInt}, dominators::{BasicBlockRefNode, ControlFlowGraph, DominatorTree}};
 
 pub struct AnnotateControlFlow {
     if_func: ValueRef,
@@ -73,7 +73,7 @@ impl AnnotateControlFlow {
             .borrow_mut()
             .insert_instruction(
                 0,
-                Inst::PhiInst(PhiInst {
+                Inst::PhiNode(PhiNode {
                     ty: int_mask.clone(),
                     incoming: vec![],
                     name: ValueName::None,
@@ -119,7 +119,7 @@ impl AnnotateControlFlow {
             };
 
             match &mut *broken.upgrade().unwrap().borrow_mut() {
-                Inst::PhiInst(phi) => {
+                Inst::PhiNode(phi) => {
                     phi.incoming.push((pred.data.clone(), phi_value));
                 }
                 _ => panic!()

@@ -1772,7 +1772,7 @@ impl Bitcode {
                                 });
                             };
 
-                            let inst = Inst::PhiInst(PhiInst {
+                            let inst = Inst::PhiNode(PhiNode {
                                 ty,
                                 incoming: vec![],
                                 name: ValueName::None,
@@ -1841,7 +1841,7 @@ impl Bitcode {
                                         })
                                         .collect::<Result<Vec<_>, _>>()?;
 
-                                    if let Inst::PhiInst(inst) =
+                                    if let Inst::PhiNode(inst) =
                                         &mut *inst.upgrade().unwrap().borrow_mut()
                                     {
                                         inst.incoming = values;
