@@ -41,6 +41,207 @@ impl Module {
                 self.values.push(value.clone());
                 Some(Rc::downgrade(&value))
             }
+            "amdgcn_if" => {
+                let ty = FunctionType {
+                    result: Box::new(Type::StructType(StructType {
+                        elements: vec![
+                            Box::new(Type::IntegerType(IntegerType {
+                                num_bits: 1,
+                            })),
+                            Box::new(types[0].clone())
+                        ],
+                        name: "".to_string(),
+                    })),
+                    params: vec![
+                        Box::new(Type::IntegerType(IntegerType {
+                            num_bits: 1,
+                        })),
+                    ],
+                    is_vararg: false,
+                };
+
+                let ty_name = match &types[0] {
+                    Type::IntegerType(ty) => format!("i{}", ty.num_bits),
+                    _ => panic!()
+                };
+
+                let func = Rc::new(RefCell::new(Function {
+                    ty,
+                    address_space: 0,
+                    linkage: LinkageTypes::External,
+                    name: ValueName::String(format!("llvm.amdgcn.if.{}", ty_name)),
+                    arguments: vec![],
+                    argument_values: vec![],
+                    bbs: vec![],
+                    bb_values: vec![],
+                    alignment: None,
+                    calling_conv: 0,
+                    attributes: AttributeList { attributes: vec![] },
+                    visibility: VisibilityTypes::Default,
+                    unnamed_address: UnnamedAddr::None,
+                    dll_storage_class: DLLStorageClassTypes::Default,
+                    comdat: None,
+                }));
+                let value = Rc::new(RefCell::new(Value::Function(func)));
+                self.values.push(value.clone());
+                Some(Rc::downgrade(&value))
+            }
+            "amdgcn_else" => {
+                let ty = FunctionType {
+                    result: Box::new(Type::StructType(StructType {
+                        elements: vec![
+                            Box::new(Type::IntegerType(IntegerType {
+                                num_bits: 1,
+                            })),
+                            Box::new(types[0].clone())
+                        ],
+                        name: "".to_string(),
+                    })),
+                    params: vec![
+                        Box::new(types[1].clone())
+                    ],
+                    is_vararg: false,
+                };
+
+                let ty_name1 = match &types[0] {
+                    Type::IntegerType(ty) => format!("i{}", ty.num_bits),
+                    _ => panic!()
+                };
+
+                let ty_name2 = match &types[1] {
+                    Type::IntegerType(ty) => format!("i{}", ty.num_bits),
+                    _ => panic!()
+                };
+
+                let func = Rc::new(RefCell::new(Function {
+                    ty,
+                    address_space: 0,
+                    linkage: LinkageTypes::External,
+                    name: ValueName::String(format!("llvm.amdgcn.else.{}.{}", ty_name1, ty_name2)),
+                    arguments: vec![],
+                    argument_values: vec![],
+                    bbs: vec![],
+                    bb_values: vec![],
+                    alignment: None,
+                    calling_conv: 0,
+                    attributes: AttributeList { attributes: vec![] },
+                    visibility: VisibilityTypes::Default,
+                    unnamed_address: UnnamedAddr::None,
+                    dll_storage_class: DLLStorageClassTypes::Default,
+                    comdat: None,
+                }));
+                let value = Rc::new(RefCell::new(Value::Function(func)));
+                self.values.push(value.clone());
+                Some(Rc::downgrade(&value))
+            }
+            "amdgcn_end_cf" => {
+                let ty = FunctionType {
+                    result: Box::new(Type::VoidType),
+                    params: vec![
+                        Box::new(types[0].clone())
+                    ],
+                    is_vararg: false,
+                };
+
+                let ty_name = match &types[0] {
+                    Type::IntegerType(ty) => format!("i{}", ty.num_bits),
+                    _ => panic!()
+                };
+
+                let func = Rc::new(RefCell::new(Function {
+                    ty,
+                    address_space: 0,
+                    linkage: LinkageTypes::External,
+                    name: ValueName::String(format!("llvm.amdgcn.end.cf.{}", ty_name)),
+                    arguments: vec![],
+                    argument_values: vec![],
+                    bbs: vec![],
+                    bb_values: vec![],
+                    alignment: None,
+                    calling_conv: 0,
+                    attributes: AttributeList { attributes: vec![] },
+                    visibility: VisibilityTypes::Default,
+                    unnamed_address: UnnamedAddr::None,
+                    dll_storage_class: DLLStorageClassTypes::Default,
+                    comdat: None,
+                }));
+                let value = Rc::new(RefCell::new(Value::Function(func)));
+                self.values.push(value.clone());
+                Some(Rc::downgrade(&value))
+            }
+            "amdgcn_if_break" => {
+                let ty = FunctionType {
+                    result: Box::new(types[0].clone()),
+                    params: vec![
+                        Box::new(Type::IntegerType(IntegerType {
+                            num_bits: 1,
+                        })),
+                        Box::new(types[0].clone())
+                    ],
+                    is_vararg: false,
+                };
+
+                let ty_name = match &types[0] {
+                    Type::IntegerType(ty) => format!("i{}", ty.num_bits),
+                    _ => panic!()
+                };
+
+                let func = Rc::new(RefCell::new(Function {
+                    ty,
+                    address_space: 0,
+                    linkage: LinkageTypes::External,
+                    name: ValueName::String(format!("llvm.amdgcn.if.break.{}", ty_name)),
+                    arguments: vec![],
+                    argument_values: vec![],
+                    bbs: vec![],
+                    bb_values: vec![],
+                    alignment: None,
+                    calling_conv: 0,
+                    attributes: AttributeList { attributes: vec![] },
+                    visibility: VisibilityTypes::Default,
+                    unnamed_address: UnnamedAddr::None,
+                    dll_storage_class: DLLStorageClassTypes::Default,
+                    comdat: None,
+                }));
+                let value = Rc::new(RefCell::new(Value::Function(func)));
+                self.values.push(value.clone());
+                Some(Rc::downgrade(&value))
+            }
+            "amdgcn_loop" => {
+                let ty = FunctionType {
+                    result: Box::new(types[0].clone()),
+                    params: vec![
+                        Box::new(types[0].clone())
+                    ],
+                    is_vararg: false,
+                };
+
+                let ty_name = match &types[0] {
+                    Type::IntegerType(ty) => format!("i{}", ty.num_bits),
+                    _ => panic!()
+                };
+
+                let func = Rc::new(RefCell::new(Function {
+                    ty,
+                    address_space: 0,
+                    linkage: LinkageTypes::External,
+                    name: ValueName::String(format!("llvm.amdgcn.loop.{}", ty_name)),
+                    arguments: vec![],
+                    argument_values: vec![],
+                    bbs: vec![],
+                    bb_values: vec![],
+                    alignment: None,
+                    calling_conv: 0,
+                    attributes: AttributeList { attributes: vec![] },
+                    visibility: VisibilityTypes::Default,
+                    unnamed_address: UnnamedAddr::None,
+                    dll_storage_class: DLLStorageClassTypes::Default,
+                    comdat: None,
+                }));
+                let value = Rc::new(RefCell::new(Value::Function(func)));
+                self.values.push(value.clone());
+                Some(Rc::downgrade(&value))
+            }
             _ => None,
         }
     }
@@ -624,6 +825,35 @@ impl BasicBlock {
             .position(|x| x.as_ptr() == value.upgrade().unwrap().as_ptr())
     }
 
+    pub fn create_call_before(
+        &mut self,
+        position: Option<&ValueRef>,
+        func: ValueRef,
+        args: Vec<ValueRef>,
+        name: ValueName,
+    ) -> Option<ValueRef> {
+        let function_type = func.upgrade().unwrap().borrow().ty().clone();
+
+        let position = if let Some(position) = position {
+            self.position(position)?
+        } else {
+            0
+        };
+
+        let (value, _) = self.insert_instruction(
+            position,
+            Inst::CallInst(CallInst {
+                args,
+                function_type,
+                callee: func,
+                attributes: AttributeList { attributes: vec![] },
+                name,
+            }),
+        );
+
+        Some(value)
+    }
+
     pub fn create_call(
         &mut self,
         position: Option<&ValueRef>,
@@ -786,7 +1016,7 @@ impl Value {
             Self::GlobalVariable(value) => value.borrow().ty.clone(),
             Self::ConstantInt(value) => value.borrow().ty.clone(),
             Self::Argument(value) => value.borrow().ty.clone(),
-            Self::Function(value) => (*value.borrow().ty.result).clone(),
+            Self::Function(value) => Type::FunctionType(value.borrow().ty.clone()),
             _ => unimplemented!(),
         }
     }
@@ -998,6 +1228,27 @@ pub struct GetElementPtrInst {
     pub name: ValueName,
 }
 
+pub fn get_index_type(ty: &Type, indexes: &Vec<u32>) -> Option<Type> {
+    if indexes.len() == 0 {
+        Some(ty.clone())
+    } else {
+        match ty {
+            Type::StructType(struct_type) => {
+                Some(*struct_type.elements[*indexes.first().unwrap() as usize].clone())
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ExtractValueInst {
+    pub ty: Type,
+    pub aggregate: ValueRef,
+    pub indexes: Vec<u32>,
+    pub name: ValueName,
+}
+
 #[derive(Clone, Debug)]
 pub enum Inst {
     BinOpInst(BinOpInst),
@@ -1011,6 +1262,7 @@ pub enum Inst {
     CastInst(CastInst),
     CallInst(CallInst),
     GetElementPtrInst(GetElementPtrInst),
+    ExtractValueInst(ExtractValueInst),
 }
 
 impl Inst {
