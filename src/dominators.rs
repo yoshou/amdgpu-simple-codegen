@@ -206,6 +206,12 @@ impl DominatorTree {
         self.children[index].iter().map(|child| &self.nodes[*child]).collect()
     }
 
+    pub fn dominates(&self, a: &BasicBlockRefNode, b: &BasicBlockRefNode) -> bool {
+        (a == b) || self.get_children(a)
+            .iter()
+            .find(|node| { **node == b }).is_some()
+    }
+
     pub fn from_cfg(graph: &ControlFlowGraph) -> DominatorTree {
         let mut tree = DominatorTree {
             nodes: graph.nodes.clone(),
