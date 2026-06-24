@@ -14,7 +14,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
         pkg-config \
+        sudo \
     && rm -rf /var/lib/apt/lists/*
+
+# Create a 'vscode' user sharing the host uid/gid (1000) so that bind-mounted
+# files (the workspace and ~/.claude) keep the host owner instead of being
+# polluted to root, and grant passwordless sudo for dev convenience. Ubuntu
+# 24.04 base ships a default 'ubuntu' user at uid 1000, so remove it first.
+ARG USERNAME=vscode
+ARG USER_UID=1000
+ARG USER_GID=1000
+RUN if id ubuntu >/dev/null 2>&1; then userdel -r ubuntu 2>/dev/null || true; fi \
+    && groupadd --gid $USER_GID $USERNAME 2>/dev/null || true \
+    && useradd --uid $USER_UID --gid $USER_GID -m -s /bin/bash $USERNAME \
+    && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME \
+    && chmod 0440 /etc/sudoers.d/$USERNAME
 
 # Rust toolchain for building amdgpu-simple-codegen. Put the ROCm LLVM/clang
 # and ROCm binaries on PATH so `clang`/`amdclang` and `rocminfo` are available.

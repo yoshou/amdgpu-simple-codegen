@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Post-create setup: register the WSL driver libraries and build/install the
 # librocdxg bridge so the in-container ROCm runtime can reach the GPU through
-# the Windows driver. Runs as root inside the dev container.
+# the Windows driver. Runs as the 'vscode' user; privileged steps use sudo.
 set -euo pipefail
 
 echo "[setup] Registering WSL driver libraries with ldconfig..."
 if [ -d /usr/lib/wsl/lib ]; then
-    echo "/usr/lib/wsl/lib" >/etc/ld.so.conf.d/wsl.conf
-    ldconfig
+    echo "/usr/lib/wsl/lib" | sudo tee /etc/ld.so.conf.d/wsl.conf >/dev/null
+    sudo ldconfig
 else
     echo "[setup] WARNING: /usr/lib/wsl/lib not found — the GPU passthrough mount is missing."
 fi
@@ -22,8 +22,8 @@ elif [ -d /opt/winsdk/shared ]; then
     git clone --depth 1 https://github.com/ROCm/librocdxg.git "$tmp/librocdxg"
     cmake -S "$tmp/librocdxg" -B "$tmp/librocdxg/build" -DWIN_SDK=/opt/winsdk/shared
     cmake --build "$tmp/librocdxg/build" -j"$(nproc)"
-    cmake --install "$tmp/librocdxg/build"
-    ldconfig
+    sudo cmake --install "$tmp/librocdxg/build"
+    sudo ldconfig
     rm -rf "$tmp"
 else
     echo "[setup] WARNING: /opt/winsdk/shared not found — cannot build librocdxg."

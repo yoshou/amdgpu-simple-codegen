@@ -3,6 +3,13 @@
     "build": {
         "dockerfile": "Dockerfile"
     },
+    "remoteUser": "vscode",
+    // Mount the workspace at the SAME absolute path as on the host. Claude Code
+    // keys conversation transcripts and memory by the workspace path, so this
+    // makes the existing project memory/history resolve inside the container.
+    // ${localWorkspaceFolder} is the host path, so nothing is hardcoded.
+    "workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind",
+    "workspaceFolder": "${localWorkspaceFolder}",
     // WSL-specific GPU passthrough. /dev/dxg is the paravirtualized GPU device;
     // the other flags follow AMD's ROCm-on-WSL container guidance.
     "runArgs": [
@@ -19,7 +26,12 @@
         "source=/usr/lib/wsl,target=/usr/lib/wsl,type=bind,readonly",
         // Windows SDK headers, needed only to build librocdxg from source.
         // Adjust the version (10.0.26100.0) if your installed SDK differs.
-        "source=/mnt/c/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0,target=/opt/winsdk,type=bind,readonly"
+        "source=/mnt/c/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0,target=/opt/winsdk,type=bind,readonly",
+        // Carry over Claude Code auth, global config, memory, and transcripts.
+        // Same uid + same workspace path means the project key matches and the
+        // existing memory/conversation history are available (resume with
+        // `claude --continue`).
+        "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind"
     ],
     "containerEnv": {
         // Required for ROCm < 7.13 so the HSA runtime loads librocdxg.
