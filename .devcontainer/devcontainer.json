@@ -1,0 +1,36 @@
+{
+    "name": "amdgpu-simple-codegen (ROCm/WSL)",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    // WSL-specific GPU passthrough. /dev/dxg is the paravirtualized GPU device;
+    // the other flags follow AMD's ROCm-on-WSL container guidance.
+    "runArgs": [
+        "--device=/dev/dxg",
+        "--cap-add=SYS_PTRACE",
+        "--security-opt",
+        "seccomp=unconfined",
+        "--ipc=host",
+        "--shm-size=8g"
+    ],
+    "mounts": [
+        // Windows driver libraries (libdxcore.so, libd3d12*.so). librocdxg and
+        // the ROCm runtime route GPU calls through these.
+        "source=/usr/lib/wsl,target=/usr/lib/wsl,type=bind,readonly",
+        // Windows SDK headers, needed only to build librocdxg from source.
+        // Adjust the version (10.0.26100.0) if your installed SDK differs.
+        "source=/mnt/c/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0,target=/opt/winsdk,type=bind,readonly"
+    ],
+    "containerEnv": {
+        // Required for ROCm < 7.13 so the HSA runtime loads librocdxg.
+        "HSA_ENABLE_DXG_DETECTION": "1"
+    },
+    "postCreateCommand": "bash .devcontainer/setup-librocdxg.sh",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer"
+            ]
+        }
+    }
+}
