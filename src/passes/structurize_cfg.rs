@@ -1,17 +1,23 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    rc::{Rc, Weak}, vec,
+    rc::{Rc, Weak},
 };
 
 use crate::{
     dominators::BasicBlockRefNode,
-    ir::{Function, Inst, Module, BasicBlock, Value, BranchInst, ValueName},
+    ir::{BasicBlock, BranchInst, Function, Inst, Value, ValueName},
     pass::RegionPass,
     region::{Region, RegionInfo, RegionRef},
 };
 
 pub struct StructurizeCFG {}
+
+impl StructurizeCFG {
+    pub fn new() -> Self {
+        StructurizeCFG {}
+    }
+}
 
 pub struct RegionGraph {
     nodes: Vec<BasicBlockRefNode>,
@@ -223,7 +229,6 @@ impl RegionPass for StructurizeCFG {
         region: Rc<RefCell<Region>>,
         function: Rc<RefCell<Function>>,
         _: &RegionInfo,
-        _: &mut Module,
     ) -> Option<Rc<RefCell<Function>>> {
         if let None = region.borrow().exit {
             return None;
@@ -248,7 +253,10 @@ impl RegionPass for StructurizeCFG {
             entries.insert(node);
 
             if let Some(exit) = &region.borrow().exit {
-                if get_succ_nodes(node).iter().any(|succ| Weak::ptr_eq(&succ.data, exit)) {
+                if get_succ_nodes(node)
+                    .iter()
+                    .any(|succ| Weak::ptr_eq(&succ.data, exit))
+                {
                     for succ in get_succ_nodes(node) {
                         if entries.contains(&succ) {
                             loop_backedges.insert(succ, node);
@@ -266,17 +274,41 @@ impl RegionPass for StructurizeCFG {
                 continue;
             };
 
-            let loop_end_index = function.borrow_mut().bbs.iter().position(|x| { return Weak::ptr_eq(x, &loop_end.data); }).unwrap();
+            let loop_end_index = function
+                .borrow_mut()
+                .bbs
+                .iter()
+                .position(|x| {
+                    return Weak::ptr_eq(x, &loop_end.data);
+                })
+                .unwrap();
 
-            let flow = Rc::new(RefCell::new(BasicBlock { insts: vec![], inst_values: vec![] }));
+            let flow = Rc::new(RefCell::new(BasicBlock {
+                insts: vec![],
+                inst_values: vec![],
+            }));
 
-            function.borrow_mut().bbs.insert(loop_end_index + 1,Rc::downgrade(&flow));
+            function
+                .borrow_mut()
+                .bbs
+                .insert(loop_end_index + 1, Rc::downgrade(&flow));
 
             let flow_value = Rc::new(RefCell::new(Value::BasicBlock(flow.clone())));
-            function.borrow_mut().bb_values.insert(loop_end_index + 1, flow_value.clone());
+            function
+                .borrow_mut()
+                .bb_values
+                .insert(loop_end_index + 1, flow_value.clone());
 
             // Modify terminator
-            let terminator = loop_end.data.upgrade().unwrap().borrow().insts.last().unwrap().clone();
+            let terminator = loop_end
+                .data
+                .upgrade()
+                .unwrap()
+                .borrow()
+                .insts
+                .last()
+                .unwrap()
+                .clone();
             match &mut *terminator.upgrade().unwrap().borrow_mut() {
                 Inst::BranchInst(inst) => {
                     if Weak::ptr_eq(&inst.true_condition, &loop_start.data) {

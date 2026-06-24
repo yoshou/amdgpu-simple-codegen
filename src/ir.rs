@@ -477,6 +477,14 @@ impl DataLayout {
         }
     }
 
+    pub fn get_pointer_size_in_bits(&self, address_space: u32) -> Option<u32> {
+        let info = &self
+            .pointers
+            .iter()
+            .find(|x| x.address_space == address_space)?;
+        Some(info.type_bit_width)
+    }
+
     pub fn get_type_alloc_size(&self, ty: &Type) -> Option<u32> {
         let storage_size = (self.get_type_size_in_bits(ty)? + 7) / 8;
         let alignment = self.get_abi_alignment_by_type(ty)?;
@@ -484,7 +492,7 @@ impl DataLayout {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 pub struct PointerType {
     pub address_space: u32,
     pub pointee_type: Option<Box<Type>>,
@@ -505,7 +513,7 @@ impl PointerType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 pub struct IntegerType {
     pub num_bits: u32,
 }
@@ -516,7 +524,7 @@ impl IntegerType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 pub struct StructType {
     pub name: String,
     pub elements: Vec<Box<Type>>,
@@ -537,7 +545,7 @@ impl StructType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 pub struct FunctionType {
     pub result: Box<Type>,
     pub params: Vec<Box<Type>>,
@@ -554,7 +562,7 @@ impl FunctionType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 pub enum Type {
     VoidType,
     FloatType,

@@ -1,5 +1,6 @@
-use num_bigint::ToBigUint;
 use std::{cell::RefCell, rc::Rc};
+
+use num_bigint::ToBigUint;
 
 use crate::{
     ir::{
@@ -9,13 +10,22 @@ use crate::{
     pass::FunctionPass,
 };
 
-pub struct LowerKernelArguments {}
+pub struct LowerKernelArguments {
+    module: Rc<RefCell<Module>>,
+}
+
+impl LowerKernelArguments {
+    pub fn new(module: &Rc<RefCell<Module>>) -> Self {
+        LowerKernelArguments {
+            module: module.clone(),
+        }
+    }
+}
 
 impl FunctionPass for LowerKernelArguments {
     fn run_on_function(
         &mut self,
-        function: Rc<RefCell<Function>>,
-        module: &mut Module,
+        function: Rc<RefCell<Function>>
     ) -> Option<Rc<RefCell<Function>>> {
         if function.borrow().calling_conv != 91 {
             return None;
@@ -29,7 +39,7 @@ impl FunctionPass for LowerKernelArguments {
             .borrow_mut()
             .create_call(
                 None,
-                module
+                self.module.borrow_mut()
                     .create_or_declar_intrinsic("amdgcn_kernarg_segment_ptr", &vec![])
                     .unwrap(),
                 vec![],
@@ -51,16 +61,16 @@ impl FunctionPass for LowerKernelArguments {
                 unimplemented!();
             }
 
-            let alignment = module
+            let alignment = self.module.borrow()
                 .data_layout
                 .get_abi_alignment_by_type(&arg.borrow().ty())
                 .unwrap();
 
-            let size = module
+            let size = self.module.borrow()
                 .data_layout
                 .get_type_size_in_bits(&arg.borrow().ty())
                 .unwrap();
-            let alloc_size = module
+            let alloc_size = self.module.borrow()
                 .data_layout
                 .get_type_alloc_size(&arg.borrow().ty())
                 .unwrap();
@@ -78,7 +88,7 @@ impl FunctionPass for LowerKernelArguments {
                         name: ValueName::None,
                     },
                 )))));
-                module.values.push(offset.clone());
+                self.module.borrow_mut().values.push(offset.clone());
 
                 let arg_ptr = entry_block
                     .upgrade()
