@@ -35,7 +35,10 @@
     ],
     "containerEnv": {
         // Required for ROCm < 7.13 so the HSA runtime loads librocdxg.
-        "HSA_ENABLE_DXG_DETECTION": "1"
+        "HSA_ENABLE_DXG_DETECTION": "1",
+        // The image's CARGO_HOME (/usr/local/cargo) is root-owned; point it at
+        // the user's home so `cargo build` can write the registry cache.
+        "CARGO_HOME": "/home/vscode/.cargo"
     },
     "postCreateCommand": "bash .devcontainer/setup-librocdxg.sh",
     "customizations": {

@@ -7,8 +7,13 @@ FROM rocm/dev-ubuntu-24.04:7.2.4
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Build tooling for librocdxg (CMake >= 3.15, GCC >= 11.4) and general dev.
+# ninja/ccache speed up the reference LLVM debug build; gdb is for stepping
+# through that LLVM to learn the GPU kernel compiler (see scripts/build-llvm-debug.sh).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         cmake \
+        ninja-build \
+        ccache \
+        gdb \
         build-essential \
         git \
         curl \

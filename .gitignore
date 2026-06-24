@@ -1,1 +1,3 @@
 /target
+/llvm-project
+/scripts/llvm-build.log
