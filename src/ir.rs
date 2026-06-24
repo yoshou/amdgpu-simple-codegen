@@ -305,8 +305,10 @@ impl DataLayout {
 
             match &token.chars().collect::<Vec<_>>()[..] {
                 ['n', 'i'] => {
+                    // ni:<as0>:<as1>:... — a colon-separated list of address
+                    // spaces, so split on every ':' rather than just the first.
                     let values = rest
-                        .splitn(2, ':')
+                        .split(':')
                         .map(|x| x.parse::<u32>())
                         .collect::<Result<Vec<_>, _>>()
                         .ok()?;
@@ -322,8 +324,11 @@ impl DataLayout {
                         token.iter().collect::<String>().parse::<u32>().unwrap()
                     };
 
+                    // p[as]:<size>:<abi>[:<pref>[:<idx>]] — up to four fields,
+                    // so split on every ':' (newer AMDGPU layouts use the
+                    // index-size field, e.g. p7:160:256:256:32).
                     let values = rest
-                        .splitn(2, ':')
+                        .split(':')
                         .map(|x| x.parse::<u32>())
                         .collect::<Result<Vec<_>, _>>()
                         .ok()?;
@@ -385,8 +390,10 @@ impl DataLayout {
 
                     legal_int_widths.push(value);
 
+                    // n<s1>:<s2>:... — a colon-separated list of legal integer
+                    // widths, so split on every ':'.
                     let values = rest
-                        .splitn(2, ':')
+                        .split(':')
                         .map(|x| x.parse::<u32>())
                         .collect::<Result<Vec<_>, _>>()
                         .ok()?;
@@ -405,7 +412,9 @@ impl DataLayout {
                     default_global_address_space =
                         token.iter().collect::<String>().parse::<u32>().ok()?;
                 }
-                _ => unimplemented!(),
+                // Other layout specs (e.g. mangling 'm', function-pointer 'F')
+                // are not modeled; skip them rather than failing the decode.
+                _ => {}
             }
         }
         Some(DataLayout {
@@ -677,6 +686,7 @@ pub enum AttributeKind {
     StackAlignment = 82,
     UWTable = 83,
     VScaleRange = 84,
+    Captures = 85,
 }
 
 #[derive(Eq, Hash, PartialEq, Clone, Debug)]

@@ -492,6 +492,10 @@ impl num::FromPrimitive for AttributeKind {
         }
     }
     fn from_u64(value: u64) -> Option<Self> {
+        // Maps the stable LLVM bitcode attribute codes (enum AttributeKindCodes
+        // in llvm/include/llvm/Bitcode/LLVMBitCodes.h, ROCm 7.2.4) to our
+        // AttributeKind. Codes we don't model yet return None so they are
+        // skipped rather than aborting the decode.
         match value {
             1 => Some(Self::Alignment),
             2 => Some(Self::AlwaysInline),
@@ -504,83 +508,88 @@ impl num::FromPrimitive for AttributeKind {
             9 => Some(Self::NoAlias),
             10 => Some(Self::NoBuiltin),
             11 => Some(Self::NoCapture),
-            12 => unimplemented!(),
-            13 => unimplemented!(),
-            14 => unimplemented!(),
-            15 => unimplemented!(),
-            16 => unimplemented!(),
-            17 => unimplemented!(),
+            12 => Some(Self::NoDuplicate),
+            13 => Some(Self::NoImplicitFloat),
+            14 => Some(Self::NoInline),
+            15 => Some(Self::NonLazyBind),
+            16 => Some(Self::NoRedZone),
+            17 => Some(Self::NoReturn),
             18 => Some(Self::NoUnwind),
-            19 => unimplemented!(),
-            20 => unimplemented!(),
+            19 => Some(Self::OptimizeForSize),
+            20 => Some(Self::ReadNone),
             21 => Some(Self::ReadOnly),
-            22 => unimplemented!(),
-            23 => unimplemented!(),
-            24 => unimplemented!(),
-            25 => unimplemented!(),
-            26 => unimplemented!(),
-            27 => unimplemented!(),
-            28 => unimplemented!(),
-            29 => unimplemented!(),
-            30 => unimplemented!(),
-            31 => unimplemented!(),
-            32 => unimplemented!(),
-            33 => unimplemented!(),
-            34 => unimplemented!(),
-            35 => unimplemented!(),
-            36 => unimplemented!(),
-            37 => unimplemented!(),
-            38 => unimplemented!(),
-            39 => unimplemented!(),
-            40 => unimplemented!(),
-            41 => unimplemented!(),
-            42 => unimplemented!(),
-            43 => unimplemented!(),
-            44 => unimplemented!(),
-            45 => unimplemented!(),
-            46 => unimplemented!(),
-            47 => unimplemented!(),
+            22 => Some(Self::Returned),
+            23 => Some(Self::ReturnsTwice),
+            24 => Some(Self::SExt),
+            25 => Some(Self::StackAlignment),
+            26 => Some(Self::StackProtect),
+            27 => Some(Self::StackProtectReq),
+            28 => Some(Self::StackProtectStrong),
+            29 => Some(Self::StructRet),
+            30 => Some(Self::SanitizeAddress),
+            31 => Some(Self::SanitizeThread),
+            32 => Some(Self::SanitizeMemory),
+            33 => Some(Self::UWTable),
+            34 => Some(Self::ZExt),
+            35 => Some(Self::Builtin),
+            36 => Some(Self::Cold),
+            37 => Some(Self::OptimizeNone),
+            38 => Some(Self::InAlloca),
+            39 => Some(Self::NonNull),
+            40 => Some(Self::JumpTable),
+            41 => Some(Self::Dereferenceable),
+            42 => Some(Self::DereferenceableOrNull),
+            43 => Some(Self::Convergent),
+            44 => Some(Self::SafeStack),
+            45 => None, // ArgMemOnly (legacy, folded into Memory)
+            46 => Some(Self::SwiftSelf),
+            47 => Some(Self::SwiftError),
             48 => Some(Self::NoRecurse),
-            49 => unimplemented!(),
-            50 => unimplemented!(),
-            51 => unimplemented!(),
+            49 => None, // InaccessibleMemOnly (legacy, folded into Memory)
+            50 => None, // InaccessibleMemOrArgMemOnly (legacy)
+            51 => Some(Self::AllocSize),
             52 => Some(Self::WriteOnly),
             53 => Some(Self::Speculatable),
-            54 => unimplemented!(),
-            55 => unimplemented!(),
-            56 => unimplemented!(),
-            57 => unimplemented!(),
-            58 => unimplemented!(),
-            59 => unimplemented!(),
-            60 => unimplemented!(),
+            54 => Some(Self::StrictFP),
+            55 => Some(Self::SanitizeHWAddress),
+            56 => Some(Self::NoCfCheck),
+            57 => Some(Self::OptForFuzzing),
+            58 => Some(Self::ShadowCallStack),
+            59 => Some(Self::SpeculativeLoadHardening),
+            60 => Some(Self::ImmArg),
             61 => Some(Self::WillReturn),
             62 => Some(Self::NoFree),
             63 => Some(Self::NoSync),
-            64 => unimplemented!(),
-            65 => unimplemented!(),
-            66 => unimplemented!(),
-            67 => unimplemented!(),
-            68 => unimplemented!(),
-            69 => unimplemented!(),
+            64 => Some(Self::SanitizeMemTag),
+            65 => Some(Self::Preallocated),
+            66 => Some(Self::NoMerge),
+            67 => Some(Self::NullPointerIsValid),
+            68 => Some(Self::NoUndef),
+            69 => Some(Self::ByRef),
             70 => Some(Self::MustProgress),
             71 => Some(Self::NoCallback),
-            72 => unimplemented!(),
-            73 => unimplemented!(),
-            74 => unimplemented!(),
-            75 => unimplemented!(),
-            76 => unimplemented!(),
-            77 => unimplemented!(),
-            78 => unimplemented!(),
-            79 => unimplemented!(),
-            80 => unimplemented!(),
-            81 => unimplemented!(),
-            82 => unimplemented!(),
-            83 => unimplemented!(),
-            84 => unimplemented!(),
-            85 => unimplemented!(),
+            72 => Some(Self::Hot),
+            73 => Some(Self::NoProfile),
+            74 => Some(Self::VScaleRange),
+            75 => Some(Self::SwiftAsync),
+            76 => Some(Self::NoSanitizeCoverage),
+            77 => Some(Self::ElementType),
+            78 => Some(Self::DisableSanitizerInstrumentation),
+            79 => Some(Self::NoSanitizeBounds),
+            80 => Some(Self::AllocAlign),
+            81 => Some(Self::AllocatedPointer),
+            82 => Some(Self::AllocKind),
+            83 => Some(Self::PresplitCoroutine),
+            84 => Some(Self::FnRetThunkExtern),
+            85 => Some(Self::SkipProfile),
             86 => Some(Self::Memory),
-            87 => unimplemented!(),
-            88 => unimplemented!(),
+            87 => Some(Self::NoFPClass),
+            88 => None,  // OptimizeForDebugging
+            89 => None,  // Writable
+            90 => None,  // CoroOnlyDestroyWhenComplete
+            91 => None,  // DeadOnUnwind
+            92 => None,  // Range (encoded as a constant-range entry)
+            102 => Some(Self::Captures),
             _ => None,
         }
     }
@@ -1191,66 +1200,123 @@ impl Bitcode {
 
                         let mut attributes = HashSet::new();
 
+                        // Each attribute within the group is introduced by a code
+                        // (see the PARAMATTR_GROUP_BLOCK ENTRY layout in the LLVM
+                        // bitcode format): 0 = enum, 1 = enum + int value,
+                        // 3 = string key, 4 = string key + value, 5 = type,
+                        // 6 = type + type id. Unknown attribute kinds are skipped
+                        // so newer LLVM releases don't break decoding.
+                        let next_u64 = |values: &mut std::slice::Iter<BitcodeValue>| {
+                            match values.next() {
+                                Some(BitcodeValue::Value(value)) => Some(*value),
+                                _ => None,
+                            }
+                        };
                         while let Some(value) = values.next() {
                             let code = match value {
                                 BitcodeValue::Value(value) => *value as u32,
                                 _ => {
                                     return Err(DecodeError {
-                                        message: "Invalid value".to_string(),
+                                        message: "Invalid attribute group entry".to_string(),
                                     })
                                 }
                             };
-                            let attribute = match code {
+                            match code {
                                 0 => {
-                                    let kind = values
-                                        .next()
-                                        .and_then(|value| match value {
-                                            BitcodeValue::Value(value) => {
-                                                AttributeKind::from_u64(*value)
-                                            }
-                                            _ => None,
-                                        })
-                                        .ok_or(DecodeError {
-                                            message: "Invalid attribute kind".to_string(),
-                                        })?;
-                                    Attribute::Enum(kind)
+                                    let raw = next_u64(&mut values).ok_or(DecodeError {
+                                        message: "Missing attribute kind".to_string(),
+                                    })?;
+                                    if let Some(kind) = AttributeKind::from_u64(raw) {
+                                        attributes.insert(Attribute::Enum(kind));
+                                    }
                                 }
                                 1 => {
-                                    let kind = values
-                                        .next()
-                                        .and_then(|value| match value {
-                                            BitcodeValue::Value(value) => {
-                                                AttributeKind::from_u64(*value)
-                                            }
-                                            _ => None,
-                                        })
-                                        .ok_or(DecodeError {
-                                            message: "Invalid attribute kind".to_string(),
-                                        })?;
-                                    let value = values
-                                        .next()
-                                        .and_then(|value| match value {
-                                            BitcodeValue::Value(value) => Some(*value),
-                                            _ => None,
-                                        })
-                                        .ok_or(DecodeError {
-                                            message: "Invalid attribute kind".to_string(),
-                                        })?;
-                                    Attribute::Int(kind, value)
+                                    let raw = next_u64(&mut values).ok_or(DecodeError {
+                                        message: "Missing attribute kind".to_string(),
+                                    })?;
+                                    let int_value = next_u64(&mut values).ok_or(DecodeError {
+                                        message: "Missing attribute value".to_string(),
+                                    })?;
+                                    if let Some(kind) = AttributeKind::from_u64(raw) {
+                                        attributes.insert(Attribute::Int(kind, int_value));
+                                    }
                                 }
-                                4 => {
+                                3 | 4 => {
                                     let key = parse_null_terminated_string(&mut values)?;
-                                    let value = parse_null_terminated_string(&mut values)?;
-                                    Attribute::String(key, value)
+                                    let value = if code == 4 {
+                                        parse_null_terminated_string(&mut values)?
+                                    } else {
+                                        String::new()
+                                    };
+                                    attributes.insert(Attribute::String(key, value));
+                                }
+                                5 | 6 => {
+                                    // Type attribute (e.g. byval(ty)); the type is
+                                    // not modeled here, so consume and skip it.
+                                    let raw = next_u64(&mut values).ok_or(DecodeError {
+                                        message: "Missing attribute kind".to_string(),
+                                    })?;
+                                    if code == 6 {
+                                        next_u64(&mut values).ok_or(DecodeError {
+                                            message: "Missing attribute type".to_string(),
+                                        })?;
+                                    }
+                                    if let Some(kind) = AttributeKind::from_u64(raw) {
+                                        attributes.insert(Attribute::Enum(kind));
+                                    }
+                                }
+                                7 | 8 => {
+                                    // Constant-range (7) and constant-range-list
+                                    // (8) attributes, e.g. range(...) on intrinsic
+                                    // returns. Not modeled here, but consumed per
+                                    // the LLVM layout so decoding stays in sync.
+                                    next_u64(&mut values).ok_or(DecodeError {
+                                        message: "Missing attribute kind".to_string(),
+                                    })?; // kind
+                                    let range_count = if code == 8 {
+                                        next_u64(&mut values).ok_or(DecodeError {
+                                            message: "Missing range count".to_string(),
+                                        })?
+                                    } else {
+                                        1
+                                    };
+                                    let bit_width = next_u64(&mut values).ok_or(DecodeError {
+                                        message: "Missing range bit width".to_string(),
+                                    })?;
+                                    // A range is two APInts: encoded as 2 words when
+                                    // it fits in 64 bits, otherwise a packed
+                                    // active-word count followed by that many words.
+                                    let words_per_range = |values: &mut std::slice::Iter<BitcodeValue>| -> Result<(), DecodeError> {
+                                        if bit_width > 64 {
+                                            let packed = next_u64(values).ok_or(DecodeError {
+                                                message: "Missing range words".to_string(),
+                                            })?;
+                                            let words = (packed & 0xFFFF_FFFF) + (packed >> 32);
+                                            for _ in 0..words {
+                                                next_u64(values).ok_or(DecodeError {
+                                                    message: "Missing range words".to_string(),
+                                                })?;
+                                            }
+                                        } else {
+                                            next_u64(values).ok_or(DecodeError {
+                                                message: "Missing range bounds".to_string(),
+                                            })?;
+                                            next_u64(values).ok_or(DecodeError {
+                                                message: "Missing range bounds".to_string(),
+                                            })?;
+                                        }
+                                        Ok(())
+                                    };
+                                    for _ in 0..range_count {
+                                        words_per_range(&mut values)?;
+                                    }
                                 }
                                 _ => {
                                     return Err(DecodeError {
-                                        message: "Invalid attribute".to_string(),
+                                        message: format!("Unsupported attribute encoding: {}", code),
                                     })
                                 }
-                            };
-
-                            attributes.insert(attribute);
+                            }
                         }
 
                         let mut list = AttributeList { attributes: vec![] };
